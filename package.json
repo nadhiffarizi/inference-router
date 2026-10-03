@@ -1,0 +1,14 @@
+{
+  "name": "inference-router",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["gateway", "console", "eval"],
+  "scripts": {
+    "dev": "npm run dev --workspace gateway",
+    "build": "npm run build --workspace gateway && npm run build --workspace console",
+    "start": "npm run start --workspace gateway",
+    "build:kb": "npm run build:kb --workspace gateway",
+    "eval": "npm run eval --workspace eval"
+  },
+  "engines": { "node": ">=20" }
+}

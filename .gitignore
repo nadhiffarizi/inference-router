@@ -1,1 +1,9 @@
+node_modules/
+dist/
+.env
+.env.*
+gateway/data/raw.csv
+gateway/data/gateway.sqlite*
+*.log
+.DS_Store
 uploads/

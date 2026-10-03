@@ -1,0 +1,129 @@
+import cors from "@fastify/cors";
+import { randomUUID } from "node:crypto";
+import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import { bootstrapDatabase, db, wasFreshDatabase } from "./db/index.js";
+import { apiKeys, kbEntries, tenants } from "./db/schema.js";
+import { config } from "./config.js";
+import { registerChatRoute } from "./routes/chat.js";
+import { registerAssistantRoute } from "./routes/assistant.js";
+import { registerUsageRoutes } from "./routes/usage.js";
+import { makeOpenRouterAdapter } from "./backends/openrouter.js";
+import { makeMockAdapter } from "./backends/mock.js";
+import { adapterRegistry } from "./routing/dispatch.js";
+import type { AdapterMeta, ModelAdapter } from "./backends/types.js";
+import { loadKb } from "./rag/kb.js";
+import { errorBody, GatewayError } from "./lib/errors.js";
+import { createHash } from "node:crypto";
+
+/**
+ * Composition root. Boot order matters and is linear on purpose:
+ * schema → seed (fresh DB only) → adapters → KB index → routes → listen.
+ * A missing env var or an unloadable KB fails here, loudly, at boot — the
+ * same fail-closed posture applied at construction time.
+ */
+
+const SYSTEM_PROMPT =
+  "You are a concise, helpful API assistant behind a multi-model gateway. Answer plainly.";
+
+async function seedTenantsIfFresh(): Promise<void> {
+  if (!wasFreshDatabase()) return;
+  const now = new Date().toISOString();
+  for (const seed of config.seedTenants) {
+    const tenantId = await db
+      .insert(tenants)
+      .values({
+        name: seed.name,
+        requestsPerDay: seed.requestsPerDay ?? config.quota.requestsPerDay,
+        tokensPerDay: config.quota.tokensPerDay,
+        createdAt: now,
+      })
+      .returning({ id: tenants.id })
+      .then((r) => r[0]?.id);
+    if (!tenantId) continue;
+    await db.insert(apiKeys).values({
+      tenantId,
+      keyHash: createHash("sha256").update(seed.key).digest("hex"),
+      label: `default (${seed.name})`,
+      createdAt: now,
+    });
+  }
+}
+
+async function loadKbEntriesIfFresh(): Promise<void> {
+  if (!wasFreshDatabase()) return;
+  // KB rows come from data/kb.json, produced by `npm run build:kb`.
+  try {
+    const { readKbSeed } = await import("./rag/kb.js");
+    const rows = readKbSeed();
+    if (rows.length === 0) return;
+    await db.insert(kbEntries).values(rows);
+  } catch (err) {
+    console.warn({ msg: "KB seed not loaded — the support assistant will refuse everything until 'npm run build:kb' runs and the DB is recreated", err: String(err) });
+  }
+}
+
+function buildAdapters(): Map<string, ModelAdapter> {
+  const a = config.backends.tierA;
+  const b = config.backends.tierB;
+  const m = config.backends.mock;
+  const metaA: AdapterMeta = { id: a.id, label: a.label, modelId: a.model, tier: "a", timeoutMs: a.timeoutMs, pricePerMTokens: a.pricePerMTokens };
+  const metaB: AdapterMeta = { id: b.id, label: b.label, modelId: b.model, tier: "b", timeoutMs: b.timeoutMs, pricePerMTokens: b.pricePerMTokens };
+  const metaMock: AdapterMeta = { id: m.id, label: m.label, modelId: m.model, tier: "mock", timeoutMs: m.timeoutMs, pricePerMTokens: m.pricePerMTokens };
+  return adapterRegistry([
+    makeOpenRouterAdapter(metaA),
+    makeOpenRouterAdapter(metaB),
+    makeMockAdapter(metaMock),
+  ]);
+}
+
+async function main(): Promise<void> {
+  bootstrapDatabase();
+  await seedTenantsIfFresh();
+  await loadKbEntriesIfFresh();
+
+  const app = Fastify({
+    logger: { level: process.env.LOG_LEVEL?.trim() || "info" },
+    genReqId: () => randomUUID(),
+    bodyLimit: 1 * 1024 * 1024,
+  });
+  await app.register(cors, { origin: true });
+
+  const byId = buildAdapters();
+  const kb = loadKb();
+  app.log.info({ kb }, "knowledge base indexed");
+
+  registerChatRoute(app, byId, SYSTEM_PROMPT);
+  registerAssistantRoute(app, byId);
+  registerUsageRoutes(app);
+
+  // Structured errors for every non-stream failure path (auth, quota, JSON
+  // validation): machine-readable {error:{code,message,...}} per DECISIONS.
+  app.setErrorHandler<FastifyError>((err, _req, reply) => {
+    if (err instanceof GatewayError) {
+      reply.status(err.status).send(errorBody(err.code, err.message, err.details));
+      return;
+    }
+    type ValidationErr = FastifyError & { validation?: unknown[] };
+    if ((err as ValidationErr).validation) {
+      // Fastify schema violations → 400 invalid_input with details.
+      reply.status(400).send(errorBody("invalid_input", err.message ?? "invalid request body", { violations: (err as ValidationErr).validation }));
+      return;
+    }
+    app.log.error({ err }, "unhandled error");
+    reply.status(500).send(errorBody("internal", "internal error — see gateway logs"));
+  });
+
+  app.get("/v1/health", async () => ({ status: "ok" }));
+
+  const port = config.port;
+  await app.listen({ port, host: "0.0.0.0" });
+  app.log.info({ port, backends: [...byId.keys()] }, "gateway listening");
+}
+
+main().catch((err) => {
+  console.error("gateway failed to boot:", err);
+  process.exit(1);
+});
+
+// Unused-import guard: FastifyInstance type is re-exported for route modules.
+export type { FastifyInstance };
