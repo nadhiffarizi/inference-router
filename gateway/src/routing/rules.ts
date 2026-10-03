@@ -22,6 +22,12 @@ export type RouteContext = {
   question: string;
   /** Normalized 0..1 retrieval confidence; undefined for plain chat. */
   retrievalConfidence?: number;
+  /**
+   * Eval/debug pin (e.g. A/B runs): force this backend first in the plan.
+   * Not policy — a gateway-debug affordance so the eval harness can pin a
+   * tier without redeploying two configs.
+   */
+  pinBackendId?: string;
 };
 
 export type Candidate = {
@@ -60,6 +66,14 @@ export function primaryReason(ctx: RouteContext): string {
 }
 
 export function buildRoutePlan(ctx: RouteContext, byId: Map<string, ModelAdapter>): Candidate[] {
+  if (ctx.pinBackendId && byId.has(ctx.pinBackendId)) {
+    const pin = byId.get(ctx.pinBackendId)!;
+    const pinned = [{ adapter: pin, reason: `pinned by request (eval A/B): ${primaryReason(ctx)}` }];
+    return pinned.concat(
+      buildRoutePlan({ ...ctx, pinBackendId: undefined }, byId).filter((c) => c.adapter.meta.id !== ctx.pinBackendId),
+    );
+  }
+
   const primary = choosePrimary(ctx);
   const plan: Candidate[] = [];
 

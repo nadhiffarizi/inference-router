@@ -25,12 +25,13 @@ const BodySchema = {
   required: ["message"],
   properties: {
     message: { type: "string", minLength: 1, maxLength: 4000 },
+    backendPin: { type: "string" },
   },
   additionalProperties: false,
 } as const;
 
 export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, ModelAdapter>): void {
-  app.post<{ Body: { message: string } }>(
+  app.post<{ Body: { message: string; backendPin?: string } }>(
     "/v1/support-assistant",
     { schema: { body: BodySchema }, onRequest: authenticate },
     async (req, reply) => {
@@ -86,6 +87,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
         capability: "support-assistant",
         question: req.body.message,
         retrievalConfidence: confidence,
+        pinBackendId: req.body.backendPin,
       };
       const plan = buildRoutePlan(routeCtx, byId);
 

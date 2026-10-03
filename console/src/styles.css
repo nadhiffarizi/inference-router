@@ -1,0 +1,49 @@
+:root {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  --bg: #0e1116;
+  --panel: #161b22;
+  --border: #2d333b;
+  --text: #d5d9de;
+  --muted: #7d8590;
+  --accent: #58a6ff;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #f85149;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+.app { max-width: 1200px; margin: 0 auto; padding: 16px; }
+
+header { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
+header h1 { font-size: 16px; margin: 0; color: var(--accent); }
+nav { display: flex; gap: 8px; }
+button {
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit;
+}
+button.active { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+select { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px; font: inherit; }
+
+.playground { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.chat, .xray { display: flex; flex-direction: column; gap: 12px; }
+textarea { width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font: inherit; }
+.row { display: flex; gap: 8px; margin-top: 8px; }
+.examples { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.card-title { color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.08em; margin-bottom: 8px; }
+.card.error { border-color: var(--err); color: var(--err); }
+.answer { white-space: pre-wrap; margin: 0; }
+.why { color: var(--warn); margin-top: 8px; }
+.muted { color: var(--muted); }
+ul, ol { margin: 4px 0; padding-left: 20px; }
+code { color: var(--accent); }
+
+.usage h2 { font-size: 14px; color: var(--muted); }
+table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: normal; font-size: 12px; }
+.plan { margin: 0; }
