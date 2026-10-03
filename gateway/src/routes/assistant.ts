@@ -184,7 +184,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
               estimatedCostUsd: costUsd,
               costSource: usage.costUsd !== undefined ? "provider" : "estimate",
             },
-            quota: { used: quotaNow, limits: { requestsPerDay: tenant.requestsPerDay, tokensPerDay: tenant.tokensPerDay } },
+            quota: { used: quotaNow, limits: { requestsPerDay: tenant.requestsPerDay, tokensPerDay: tenant.tokensPerDay, budgetUsdPerDay: tenant.budgetUsdPerDay } },
             retrieval: { entries, confidence },
             intent: intentResult,
             ok: !streamError,

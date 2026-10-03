@@ -1,37 +1,56 @@
 import { useState } from "react";
-import { BarChart3, MessageSquareText, Network, UserRound } from "lucide-react";
+import { BarChart3, Eye, KeyRound, MessageSquareText, Network, LogOut } from "lucide-react";
+import { AuthProvider, useAuth } from "./auth";
+import { LoginView } from "./login";
 import { Playground } from "./playground";
+import { ApiKeysView } from "./keys";
 import { UsageView } from "./usage";
+import { ObservabilityView } from "./observability";
 import { Badge } from "./components/ui/badge";
-import { Select } from "./components/ui/input";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarHeader,
   SidebarLabel, SidebarMenuItem, SidebarProvider, SidebarTrigger, useSidebar,
 } from "./components/ui/sidebar";
-import { cn } from "./lib/utils";
+import { cn, usd } from "./lib/utils";
 
 /**
- * App shell per klipsi design.md: collapsible shadcn sidebar on desktop
- * (full ↔ icon rail via SidebarTrigger), top bar inside the content area,
- * fixed bottom tab bar on mobile — no hamburger.
+ * Shell: login gate → role-scoped sidebar. Admin IS a tenant: identical
+ * Playground / API Keys / Usage flows plus one extra menu, Observability
+ * (cross-tenant reads + decision log), enforced server-side.
  */
 
-const KEYS = [
-  { label: "tenant: demo", hint: "200 req/day", key: "sk_demo_key_0000000000000000" },
-  { label: "tenant: stress", hint: "3 req/day", key: "sk_stress_key_0000000000000000" },
-];
+type Tab = "playground" | "keys" | "usage" | "observability";
 
-type Tab = "playground" | "usage";
-
-const NAV: { id: Tab; label: string; icon: typeof BarChart3; title: string; subtitle: string }[] = [
-  { id: "playground", label: "Chat Playground", icon: MessageSquareText, title: "Playground", subtitle: "support assistant, live through the gateway" },
-  { id: "usage", label: "Usage", icon: BarChart3, title: "Usage", subtitle: "requests, cost, quota, routing decisions" },
+const NAV: { id: Tab; label: string; icon: typeof BarChart3; role: "all" | "admin"; title: string; subtitle: string }[] = [
+  { id: "playground", label: "Playground", icon: MessageSquareText, role: "all", title: "Playground", subtitle: "support assistant, live through the gateway" },
+  { id: "keys", label: "API Keys", icon: KeyRound, role: "all", title: "API Keys", subtitle: "issue, copy, and the endpoints to integrate against" },
+  { id: "usage", label: "Usage", icon: BarChart3, role: "all", title: "Usage", subtitle: "requests, spend, quota remaining — own tenant" },
+  { id: "observability", label: "Observability", icon: Eye, role: "admin", title: "Observability", subtitle: "all tenants + routing decision log" },
 ];
 
 export function App(): React.ReactElement {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
+  );
+}
+
+function Gate(): React.ReactElement {
+  const { me, loading, logout } = useAuth();
   const [tab, setTab] = useState<Tab>("playground");
-  const [apiKey, setApiKey] = useState(KEYS[0]!.key);
-  const current = NAV.find((n) => n.id === tab)!;
+
+  if (loading) {
+    return <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">loading…</div>;
+  }
+  if (!me) {
+    return <LoginView onLoggedIn={() => window.location.reload()} />;
+  }
+
+  const role = me.user.role;
+  const menus = NAV.filter((n) => n.role === "all" || role === "admin");
+  const current = menus.find((n) => n.id === tab) ?? menus[0]!;
+  const activeTab = current.id;
 
   return (
     <SidebarProvider>
@@ -44,14 +63,14 @@ export function App(): React.ReactElement {
             <BrandText />
           </SidebarHeader>
 
-          <SidebarLabel>workspace</SidebarLabel>
+          <SidebarLabel>menu</SidebarLabel>
           <SidebarContent>
-            {NAV.map((n) => (
+            {menus.map((n) => (
               <SidebarMenuItem
                 key={n.id}
                 icon={n.icon}
                 label={n.label}
-                active={tab === n.id}
+                active={activeTab === n.id}
                 onClick={() => setTab(n.id)}
               />
             ))}
@@ -59,22 +78,24 @@ export function App(): React.ReactElement {
 
           <SidebarFooter>
             <SidebarLabel>
-              <span className="inline-flex items-center gap-1.5">
-                <UserRound className="size-3.5" /> tenant
-              </span>
+              identity
             </SidebarLabel>
-            <Select value={apiKey} onChange={(e) => setApiKey(e.target.value)} aria-label="tenant key">
-              {KEYS.map((k) => (
-                <option key={k.key} value={k.key}>
-                  {k.label}
-                </option>
-              ))}
-            </Select>
-            <TenantHint apiKey={apiKey} />
+            <div className="rounded-lg border p-2.5">
+              <p className="truncate text-xs font-medium">{me.user.email}</p>
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <Badge variant={role === "admin" ? "info" : "secondary"}>{role === "admin" ? "admin" : "product team"}</Badge>
+                <span className="font-mono text-[10px] text-muted-foreground">{me.user.tenant.name}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => void logout()}
+              className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            >
+              <LogOut className="size-3.5" /> sign out
+            </button>
           </SidebarFooter>
         </Sidebar>
 
-        {/* content column: padding tracks the rail (inside provider → can read collapse state) */}
         <MainColumn>
           <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-6">
             <div className="flex min-w-0 items-center gap-3">
@@ -84,35 +105,24 @@ export function App(): React.ReactElement {
                 <p className="truncate text-xs text-muted-foreground">{current.subtitle}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="hidden text-muted-foreground md:inline-flex">
-                {KEYS.find((k) => k.key === apiKey)?.label}
-              </Badge>
-              <Select
-                className="h-8 w-36 text-xs md:hidden"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                aria-label="tenant key"
-              >
-                {KEYS.map((k) => (
-                  <option key={k.key} value={k.key}>
-                    {k.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            <Badge variant="outline" className="hidden text-muted-foreground md:inline-flex">
+              {me.user.tenant.name} · {me.usage.usdSpend > 0 ? `${usd(me.usage.usdSpend)} today` : "no spend today"}
+            </Badge>
           </header>
 
           <main className="px-4 pb-24 md:px-8 md:pb-10">
-            {tab === "playground" ? <Playground apiKey={apiKey} /> : <UsageView apiKey={apiKey} />}
+            {activeTab === "playground" && <Playground />}
+            {activeTab === "keys" && <ApiKeysView />}
+            {activeTab === "usage" && <UsageView />}
+            {activeTab === "observability" && <ObservabilityView />}
           </main>
         </MainColumn>
 
         {/* mobile bottom tab bar (design.md: no hamburger on mobile) */}
         <nav className="fixed inset-x-0 bottom-0 z-40 flex justify-around border-t border-sidebar-border bg-sidebar px-2 pb-[env(safe-area-inset-bottom)] pt-1.5 md:hidden">
-          {NAV.map((n) => {
+          {menus.map((n) => {
             const Icon = n.icon;
-            const active = tab === n.id;
+            const active = activeTab === n.id;
             return (
               <button
                 key={n.id}
@@ -123,7 +133,7 @@ export function App(): React.ReactElement {
                 )}
               >
                 <Icon className={cn("size-5", active && "fill-primary/15")} />
-                {n.label.split(" ").pop()}
+                {n.label.split(" ")[0]!.slice(0, 9)}
                 {active && <span className="size-1 rounded-full bg-primary" />}
               </button>
             );
@@ -134,7 +144,6 @@ export function App(): React.ReactElement {
   );
 }
 
-/** Brand text hides on the collapsed rail (icon stays). */
 function BrandText(): React.ReactElement | null {
   const { collapsed } = useSidebar();
   if (collapsed) return null;
@@ -146,22 +155,11 @@ function BrandText(): React.ReactElement | null {
   );
 }
 
-function TenantHint({ apiKey }: { apiKey: string }): React.ReactElement | null {
-  const { collapsed } = useSidebar();
-  if (collapsed) return null;
-  return <p className="px-1 text-xs text-muted-foreground">{KEYS.find((k) => k.key === apiKey)?.hint}</p>;
-}
-
 /** Content column whose left padding follows the collapsible rail width. */
 function MainColumn({ children }: { children: React.ReactNode }): React.ReactElement {
   const { collapsed } = useSidebar();
   return (
-    <div
-      className={cn(
-        "min-h-svh transition-[padding] duration-200 ease-in-out md:pl-60",
-        collapsed && "md:pl-14",
-      )}
-    >
+    <div className={cn("min-h-svh transition-[padding] duration-200 ease-in-out md:pl-60", collapsed && "md:pl-14")}>
       {children}
     </div>
   );

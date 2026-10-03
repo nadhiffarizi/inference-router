@@ -121,7 +121,7 @@ export function registerChatRoute(
             estimatedCostUsd: costUsd,
             costSource: priceExact ? "provider" : "estimate",
           },
-          quota: { used: quotaNow, limits: tenantLimits },
+          quota: { used: quotaNow, limits: { ...tenantLimits, budgetUsdPerDay: tenant.budgetUsdPerDay } },
           ok: !streamError,
         },
       });

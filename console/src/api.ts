@@ -39,7 +39,10 @@ export type StreamFinal = {
   retrieval?: { entries: RetrievedEntry[]; confidence: number };
   intent?: { intent: string | null; confidence: number };
   metering?: Metering;
-  quota?: { used: { requestCount: number; tokensTotal: number; day: string }; limits: { requestsPerDay: number; tokensPerDay: number } };
+  quota?: {
+    used: { requestCount: number; tokensTotal: number; usdSpend?: number; day: string };
+    limits: { requestsPerDay: number; tokensPerDay: number; budgetUsdPerDay?: number };
+  };
   ok?: boolean;
 };
 

@@ -1,29 +1,119 @@
 import { useRef, useState } from "react";
-import { ArrowUp, Square, Sparkles } from "lucide-react";
+import { ArrowUp, KeyRound, Square, Sparkles } from "lucide-react";
 import { postStream, type StreamFinal, type StreamMeta } from "./api";
+import { useKeys } from "./keys";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
-import { Textarea } from "./components/ui/input";
+import { Input, Textarea } from "./components/ui/input";
 import { cn, usd } from "./lib/utils";
 import { outcomeBadge } from "./lib/badges";
 
 /**
- * Playground: the answer with its X-ray — routing (which backend, why,
- * fallback), retrieval, intent, metering, quota. Status renders through the
- * shared badge mapping (lib/badges.ts), monochrome-first.
+ * Playground: chat on the left, the X-ray on the right. Gated on an issued
+ * API key (the product-team integration flow): issue in the keys screen →
+ * paste here. The pasted key persists locally so reloads don't re-paste.
  */
+
+const KEY_STORAGE = "playground.key";
 
 type Fault = { code: string; message: string };
 
-const EXAMPLES = [
-  "how do I cancel my order?",
-  "what payment methods do you accept?",
-  "what is the meaning of life?",
-];
+const EXAMPLES = ["how do I cancel my order?", "what payment methods do you accept?", "what is the meaning of life?"];
 
-export function Playground({ apiKey }: { apiKey: string }): React.ReactElement {
-  const [turn, setTurn] = useState<Turn | null>(null);
+export function Playground(): React.ReactElement {
+  const [pastedKey, setPastedKey] = useState<string | null>(() => localStorage.getItem(KEY_STORAGE));
+  const keys = useKeys();
+
+  function connect(key: string): void {
+    const trimmed = key.trim();
+    if (!trimmed) return;
+    localStorage.setItem(KEY_STORAGE, trimmed);
+    setPastedKey(trimmed);
+  }
+
+  function disconnect(): void {
+    localStorage.removeItem(KEY_STORAGE);
+    setPastedKey(null);
+  }
+
+  if (!pastedKey) {
+    return <ConnectGate keysPresent={keys.keys.length > 0} onIssued={connect} onConnect={connect} error={keys.error} />;
+  }
+  return <Chat apiKey={pastedKey} tenant={"demo"} onDisconnect={disconnect} />;
+}
+
+/** The issue → copy → paste gate, exactly per the ops spec. */
+function ConnectGate({
+  keysPresent,
+  onIssued,
+  onConnect,
+  error,
+}: {
+  keysPresent: boolean;
+  onIssued: (key: string) => void;
+  onConnect: (key: string) => void;
+  error: string | null;
+}): React.ReactElement {
+  const [busy, setBusy] = useState(false);
+  const [value, setValue] = useState("");
+
+  async function issueAndConnect(): Promise<void> {
+    setBusy(true);
+    const issued = await issueKeyOnPlayground();
+    setBusy(false);
+    if (issued) onIssued(issued);
+  }
+
+  return (
+    <div className="mx-auto max-w-xl pt-5">
+      <Card>
+        <CardHeader><CardTitle>connect the playground</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          {!keysPresent && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+              Your account has no API key yet — the playground calls the gateway with a key, like a product
+              team's integration would.
+              <Button className="mt-3 w-full" size="sm" onClick={() => void issueAndConnect()} disabled={busy}>
+                <KeyRound className="size-3.5" /> {busy ? "issuing…" : "Issue an API key and connect"}
+              </Button>
+            </div>
+          )}
+          {keysPresent && (
+            <p className="text-sm text-muted-foreground">
+              You have an active key (masked again on the API Keys page — plaintext is shown once). Paste it
+              here, or issue a fresh one.
+            </p>
+          )}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              onConnect(value);
+            }}
+            className="flex gap-2"
+          >
+            <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder="sk_… paste your API key" className="font-mono" />
+            <Button type="submit" size="sm" disabled={!value.trim()}>Connect</Button>
+          </form>
+          <Button variant="outline" size="sm" onClick={() => void issueAndConnect()} disabled={busy}>
+            <KeyRound className="size-3" /> issue a fresh key
+          </Button>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+async function issueKeyOnPlayground(): Promise<string | null> {
+  const res = await fetch("/v1/console/keys", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "playground" }) });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { apiKey: string };
+  return data.apiKey;
+}
+
+function Chat({ apiKey, onDisconnect }: { apiKey: string; tenant?: string; onDisconnect: () => void }): React.ReactElement {
+  const [turn, setTurn] = useState<Fault | null>(null);
   const [meta, setMeta] = useState<StreamMeta | null>(null);
   const [final, setFinal] = useState<StreamFinal | null>(null);
   const [streamText, setStreamText] = useState("");
@@ -46,11 +136,11 @@ export function Playground({ apiKey }: { apiKey: string }): React.ReactElement {
         onMeta: setMeta,
         onDelta: (t) => setStreamText((s) => s + t),
         onFinal: setFinal,
-        onError: (code, message) => setTurn({ kind: "error", code, message }),
+        onError: (code, message) => setTurn({ code, message }),
         onDone: () => undefined,
       }, controller.signal);
     } catch (err) {
-      if (!controller.signal.aborted) setTurn({ kind: "error", code: "network", message: String(err) });
+      if (!controller.signal.aborted) setTurn({ code: "network", message: String(err) });
     } finally {
       setBusy(false);
       abortRef.current = null;
@@ -75,7 +165,9 @@ export function Playground({ apiKey }: { apiKey: string }): React.ReactElement {
                 }}
               />
               <div className="mt-3 flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">⌘↵ to send · streamed via SSE</p>
+                <Button type="button" variant="ghost" size="sm" onClick={onDisconnect} className="text-muted-foreground">
+                  disconnect key
+                </Button>
                 {busy ? (
                   <Button type="button" variant="outline" size="sm" onClick={() => abortRef.current?.abort()}>
                     <Square className="size-3.5" /> Stop
@@ -90,7 +182,7 @@ export function Playground({ apiKey }: { apiKey: string }): React.ReactElement {
           </CardContent>
         </Card>
 
-        {turn?.kind === "error" && (
+        {turn && (
           <Card className="border-destructive/40">
             <CardContent className="p-4">
               <Badge variant="destructive">{turn.code}</Badge>
@@ -99,15 +191,11 @@ export function Playground({ apiKey }: { apiKey: string }): React.ReactElement {
           </Card>
         )}
 
-        {meta && !turn?.kind && (
+        {meta && !turn && (
           <Card>
-            <CardHeader>
-              <CardTitle>answer</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>answer</CardTitle></CardHeader>
             <CardContent>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                {busy ? streamText || "…" : answer}
-              </p>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">{busy ? streamText || "…" : answer}</p>
               {final?.refused && (
                 <p className="mt-3 text-xs text-muted-foreground">
                   <Badge variant="warning" className="mr-2">refused</Badge>
@@ -118,8 +206,8 @@ export function Playground({ apiKey }: { apiKey: string }): React.ReactElement {
           </Card>
         )}
 
-        <div className="flex flex-wrap gap-2">
-          <Sparkles className="mt-1.5 size-4 text-muted-foreground" />
+        <div className="flex flex-wrap items-center gap-2">
+          <Sparkles className="size-4 text-muted-foreground" />
           {EXAMPLES.map((ex) => (
             <Button key={ex} variant="outline" size="sm" className="rounded-full" onClick={() => setInput(ex)}>
               {ex}
@@ -130,9 +218,7 @@ export function Playground({ apiKey }: { apiKey: string }): React.ReactElement {
 
       <div className="flex flex-col gap-4">
         <Card>
-          <CardHeader>
-            <CardTitle>routing</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle>routing</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {meta ? (
               <>
@@ -168,7 +254,7 @@ export function Playground({ apiKey }: { apiKey: string }): React.ReactElement {
                   <ul className="space-y-1.5">
                     {meta.retrieval.entries.map((e) => (
                       <li key={e.id} className="truncate text-xs text-muted-foreground">
-                        <Badge variant="outline" className="mr-1.5 font-mono text-[10px]">{e.intent}</Badge>
+                        <Badge variant="outline" className="mr-1.5 text-[10px]">{e.intent}</Badge>
                         {e.question.slice(0, 48)}
                       </li>
                     ))}
@@ -205,8 +291,9 @@ export function Playground({ apiKey }: { apiKey: string }): React.ReactElement {
               ) : <p className="text-sm text-muted-foreground">waiting…</p>}
               {final?.quota && (
                 <p className="mt-3 text-xs text-muted-foreground">
-                  quota today: {final.quota.used.requestCount}/{final.quota.limits.requestsPerDay} requests ·{" "}
-                  {final.quota.used.tokensTotal}/{final.quota.limits.tokensPerDay} tokens
+                  quota today: {final.quota.used.requestCount}/{final.quota.limits.requestsPerDay} requests · spend $
+                  {Number(final.quota.used.usdSpend ?? 0).toFixed(4)} of $
+                  {(final.quota.limits as { budgetUsdPerDay?: number }).budgetUsdPerDay?.toFixed(2) ?? "—"}
                 </p>
               )}
             </CardContent>
@@ -226,5 +313,3 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
     </div>
   );
 }
-
-type Turn = { kind: "error"; code: string; message: string };
