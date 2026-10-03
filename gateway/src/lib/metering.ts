@@ -30,6 +30,10 @@ export type MeteredResult = {
   retrievedCount?: number;
   intent?: string;
   confidence?: number;
+  /** Turn trace — stored with the metering row for the console's trace viewer. */
+  question?: string;
+  answer?: string;
+  retrievalJson?: string;
 };
 
 export async function recordRequest(result: MeteredResult, requestId: string): Promise<void> {

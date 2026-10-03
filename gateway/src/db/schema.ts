@@ -66,6 +66,10 @@ export const requests = sqliteTable("requests", {
   retrievedCount: integer("retrieved_count"),
   intent: text("intent"),
   confidence: real("confidence"),
+  /** Turn trace (Langfuse-mini): the stored conversation turn for inspection. */
+  question: text("question"),
+  answer: text("answer"),
+  retrievalJson: text("retrieval_json"),
   createdAt: text("created_at").notNull(),
 });
 

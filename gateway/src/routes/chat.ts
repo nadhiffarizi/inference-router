@@ -71,7 +71,7 @@ export function registerChatRoute(
         await recordRequest({
           tenantId: tenant.id, capability: "chat", ...reqKey(req), backendId: "none", modelId: "none",
           promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
-          estimatedCostUsd: 0, outcome: "failed", error: outcome.lastError,
+          estimatedCostUsd: 0, outcome: "failed", error: outcome.lastError, question: req.body.message,
         }, requestId);
         return closeSse(reply);
       }
@@ -86,10 +86,13 @@ export function registerChatRoute(
 
       let usage = { promptTokens: 0, completionTokens: 0, costUsd: undefined as number | undefined };
       let streamError: string | undefined;
+      let answer = "";
       try {
         for await (const ev of outcome.stream) {
-          if (ev.type === "delta") writeEvent(reply, { type: "delta", data: { text: ev.text } });
-          else usage = { promptTokens: ev.usage.promptTokens, completionTokens: ev.usage.completionTokens, costUsd: ev.usage.costUsd };
+          if (ev.type === "delta") {
+            writeEvent(reply, { type: "delta", data: { text: ev.text } });
+            answer += ev.text;
+          } else usage = { promptTokens: ev.usage.promptTokens, completionTokens: ev.usage.completionTokens, costUsd: ev.usage.costUsd };
         }
       } catch (err) {
         // Mid-stream fault after first byte: surfaced, not retried (DECISIONS.md notes in dispatch.ts).
@@ -105,6 +108,7 @@ export function registerChatRoute(
         modelId: outcome.chosen.meta.modelId, promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
         outcome: streamError ? "failed" : "ok", error: streamError,
+        question: req.body.message, answer, // turn trace (Langfuse-mini)
       }, requestId);
       await bumpQuota(tenant.id, usage.promptTokens + usage.completionTokens).catch((err) =>
         console.error({ msg: "quota bump failed", requestId, err: String(err) }));

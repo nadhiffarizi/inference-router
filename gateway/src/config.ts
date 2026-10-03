@@ -101,9 +101,10 @@ export const config = {
   },
 
   /** Seed tenants are fixtures (DECISIONS.md D10 — no tenant CRUD UI).
-   *  Format: "name:key:requestsPerDay:budgetUsdPerDay" — quota currency is USD. */
+   *  Format: "name:key:requestsPerDay:budgetUsdPerDay" — quota currency is USD.
+   *  key "-" = start WITHOUT a key (the console's issue flow becomes the real path). */
   seedTenants: (process.env.SEED_TENANTS?.trim() ||
-    "ops:sk_ops_key_000000000000000000000:500:10, demo:sk_demo_key_0000000000000000:200:1, stress:sk_stress_key_0000000000000000:3:0.05")
+    "ops:-:500:10, demo:-:200:1, stress:sk_stress_key_0000000000000000:3:0.05, eval:sk_eval_key_000000000000000000:500:1")
     .split(",")
     .map((entry) => {
       const [name, key, requests, budget] = entry.split(":");

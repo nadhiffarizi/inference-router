@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS requests (
   estimated_cost_usd REAL NOT NULL DEFAULT 0,
   outcome TEXT NOT NULL,
   error TEXT,
+  question TEXT,
+  answer TEXT,
+  retrieval_json TEXT,
   retrieved_count INTEGER,
   intent TEXT,
   confidence REAL,
@@ -114,6 +117,9 @@ export function bootstrapDatabase(): void {
     "ALTER TABLE api_keys ADD COLUMN masked_key TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE requests ADD COLUMN api_key_id INTEGER",
     "ALTER TABLE requests ADD COLUMN key_label TEXT",
+    "ALTER TABLE requests ADD COLUMN question TEXT",
+    "ALTER TABLE requests ADD COLUMN answer TEXT",
+    "ALTER TABLE requests ADD COLUMN retrieval_json TEXT",
   ]) {
     try {
       sqlite.exec(stmt);

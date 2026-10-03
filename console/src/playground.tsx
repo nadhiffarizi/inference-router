@@ -95,9 +95,11 @@ function ConnectGate({
             <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder="sk_… paste your API key" className="font-mono" />
             <Button type="submit" size="sm" disabled={!value.trim()}>Connect</Button>
           </form>
-          <Button variant="outline" size="sm" onClick={() => void issueAndConnect()} disabled={busy}>
-            <KeyRound className="size-3" /> issue a fresh key
-          </Button>
+          {!keysPresent && (
+            <Button variant="outline" size="sm" onClick={() => void issueAndConnect()} disabled={busy}>
+              <KeyRound className="size-3" /> {busy ? "issuing…" : "Issue an API key"}
+            </Button>
+          )}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </CardContent>
       </Card>

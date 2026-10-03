@@ -74,6 +74,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
           promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
           estimatedCostUsd: 0, outcome: "refused",
           retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
+          question: req.body.message, retrievalJson: JSON.stringify(entries),
         }, requestId);
         // A refusal is still a served request — it consumes a request slot,
         // zero tokens (no model was called).
@@ -117,6 +118,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
           promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
           estimatedCostUsd: 0, outcome: "failed", error: outcome.lastError,
           retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
+          question: req.body.message, retrievalJson: JSON.stringify(entries),
         }, requestId);
         closeSse(reply);
         return;
@@ -198,6 +200,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
         completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
         outcome: unusable ? "refused" : streamError ? "failed" : "ok",
         error: streamError, retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
+        question: req.body.message, answer: unusable ? "" : answer, retrievalJson: JSON.stringify(entries),
       }, requestId);
       if (!unusable) {
         await bumpQuota(tenant.id, usage.promptTokens + usage.completionTokens).catch((err) =>

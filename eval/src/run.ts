@@ -12,7 +12,7 @@ import { type CaseResult, type EvalCase, type RunSummary } from "./data.js";
  */
 
 const GATEWAY = process.env.GATEWAY_URL?.trim() || "http://localhost:8787";
-const TENANT_KEY = process.env.EVAL_TENANT_KEY?.trim() || "sk_demo_key_0000000000000000";
+const TENANT_KEY = process.env.EVAL_TENANT_KEY?.trim() || "sk_eval_key_000000000000000000";
 const PINS: Record<string, string> = { A: "openrouter-tier-a", B: "openrouter-tier-b" };
 const CONCURRENCY = Number(process.env.EVAL_CONCURRENCY || 4);
 

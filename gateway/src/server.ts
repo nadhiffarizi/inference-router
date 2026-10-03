@@ -43,6 +43,7 @@ async function seedTenantsIfFresh(): Promise<void> {
       .returning({ id: tenants.id })
       .then((r) => r[0]?.id);
     if (!tenantId) continue;
+    if (seed.key === "-") continue; // keyless tenant → console issue flow is the real path
     await db.insert(apiKeys).values({
       tenantId,
       keyHash: createHash("sha256").update(seed.key).digest("hex"),

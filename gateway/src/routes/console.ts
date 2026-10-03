@@ -165,23 +165,30 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
   });
 
   /**
-   * One account, one active key: POST here issues a key and revokes the
-   * previous one in the same breath — so "issue" doubles as "rotate",
-   * and the old key dies immediately (auth lookups fail closed on 401).
-   * Metering rows keep the old key's denormalized label, so history survives.
+   * One account, one key — and it's irreplaceable for this demo: issuance
+   * only when none exists (the seeded fixture key counts). This makes the
+   * key a permanent identity artifact rather than a rotating credential —
+   * fine at demo scale, and a fresh `gateway.sqlite` restores the seed key.
    */
   app.post<{ Body: { label?: string } }>("/v1/console/keys", { onRequest: consoleRoute }, async (req, reply) => {
     const user = reqUser(req);
+    const existing = await db
+      .select({ id: apiKeys.id, label: apiKeys.label })
+      .from(apiKeys)
+      .where(eq(apiKeys.tenantId, user.tenant.id))
+      .limit(1)
+      .then((r) => r[0]);
+    if (existing) {
+      throw errors.conflict(
+        `Key already exists (${existing.label}) and is irreplaceable — recreate the database to reset demo fixtures.`,
+      );
+    }
     const { key, keyHash, masked } = generateApiKey();
-    // better-sqlite3 transactions are sync-only under Drizzle; two awaited
-    // statements are atomic-equivalent here (local single-writer DB).
-    const label = req.body.label?.trim() || `key ${new Date().toISOString().slice(0, 10)}`;
-    await db.delete(apiKeys).where(eq(apiKeys.tenantId, user.tenant.id));
     await db.insert(apiKeys).values({
       tenantId: user.tenant.id,
       keyHash,
       maskedKey: masked,
-      label,
+      label: req.body.label?.trim() || `key ${new Date().toISOString().slice(0, 10)}`,
       createdAt: new Date().toISOString(),
     });
     reply.status(201);
@@ -225,7 +232,39 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
         /* skip broken tenant */
       }
     }
-    return { tenants: tenantsSummary, keys: fleetKeys, decisions };
+
+    // Activity feed: the individual gateway calls (latest 50) with traces —
+    // openrouter's "activity" table. Clicking one opens the chat-turn viewer.
+    const tenantNameById = new Map(all.map((t) => [t.id, t.name]));
+    const activity = await db
+      .select()
+      .from(requests)
+      .orderBy(desc(requests.createdAt))
+      .limit(50)
+      .then((rows) =>
+        rows.map((r) => ({
+          id: r.id,
+          createdAt: r.createdAt,
+          tenant: tenantNameById.get(r.tenantId) ?? String(r.tenantId),
+          capability: r.capability,
+          keyLabel: r.keyLabel,
+          backendId: r.backendId,
+          modelId: r.modelId,
+          tokens: r.promptTokens + r.completionTokens,
+          costUsd: r.estimatedCostUsd,
+          latencyMs: r.latencyMs,
+          outcome: r.outcome,
+          // trace payload for the chat-turn viewer:
+          question: r.question,
+          answer: r.answer,
+          retrievalConfidence: r.confidence,
+          retrieval: r.retrievalJson ? (JSON.parse(r.retrievalJson) as { id: number; question: string; answer: string; intent: string }[]) : null,
+          intent: r.intent,
+          error: r.error,
+        })),
+      );
+
+    return { tenants: tenantsSummary, keys: fleetKeys, activity, decisions };
   });
 }
 
