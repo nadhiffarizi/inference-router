@@ -4,6 +4,7 @@
    leaves dark-mode default as an open decision; this is the temporary value). */
 
 @import "tailwindcss";
+@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 

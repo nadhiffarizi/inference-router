@@ -70,7 +70,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
           fallbackTriggered: false,
         });
         await recordRequest({
-          tenantId: tenant.id, capability: "support-assistant", backendId: "none", modelId: "none",
+          tenantId: tenant.id, capability: "support-assistant", ...reqKey(req), backendId: "none", modelId: "none",
           promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
           estimatedCostUsd: 0, outcome: "refused",
           retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
@@ -113,7 +113,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
       if (!outcome.ok) {
         writeEvent(reply, { type: "error", data: errorBody("backend_unavailable", `no backend served the request: ${outcome.lastError}`, { plan: outcome.steps }) });
         await recordRequest({
-          tenantId: tenant.id, capability: "support-assistant", backendId: "none", modelId: "none",
+          tenantId: tenant.id, capability: "support-assistant", ...reqKey(req), backendId: "none", modelId: "none",
           promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
           estimatedCostUsd: 0, outcome: "failed", error: outcome.lastError,
           retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
@@ -193,7 +193,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
       }
 
       await recordRequest({
-        tenantId: tenant.id, capability: "support-assistant", backendId: outcome.chosen.meta.id,
+        tenantId: tenant.id, capability: "support-assistant", ...reqKey(req), backendId: outcome.chosen.meta.id,
         modelId: outcome.chosen.meta.modelId, promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
         outcome: unusable ? "refused" : streamError ? "failed" : "ok",
@@ -227,3 +227,8 @@ function assistantPrompt(entries: RetrievedEntryLite[], intent: string | null): 
 }
 
 type RetrievedEntryLite = { question: string; answer: string; intent: string };
+
+/** The issued key that authenticated this request (for per-key usage). */
+function reqKey(req: { apiKey?: { id: number; label: string } }): { apiKeyId?: number; keyLabel?: string } {
+  return req.apiKey ? { apiKeyId: req.apiKey.id, keyLabel: req.apiKey.label } : {};
+}

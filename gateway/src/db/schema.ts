@@ -50,6 +50,9 @@ export const requests = sqliteTable("requests", {
   id: text("id").primaryKey(), // requestId (uuid)
   tenantId: integer("tenant_id").notNull(),
   capability: text("capability").notNull(), // chat | support-assistant
+  /** Issued-key identity — usage is tracked per key NAME (openrouter-style). */
+  apiKeyId: integer("api_key_id"),
+  keyLabel: text("key_label"),
   backendId: text("backend_id").notNull(), // which backend served (or none)
   modelId: text("model_id").notNull(),
   promptTokens: integer("prompt_tokens").notNull().default(0),

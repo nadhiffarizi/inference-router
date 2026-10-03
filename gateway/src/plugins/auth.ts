@@ -10,6 +10,8 @@ import type { TenantRow } from "../lib/quota.js";
 declare module "fastify" {
   interface FastifyRequest {
     tenant?: TenantRow;
+    /** The issued key that authenticated this request — metering attaches it. */
+    apiKey?: { id: number; label: string };
   }
 }
 
@@ -38,7 +40,7 @@ export async function authenticate(
 
   const keyHash = createHash("sha256").update(key).digest("hex");
   const row = await db
-    .select({ tenantId: apiKeys.tenantId })
+    .select({ apiKeyId: apiKeys.id, keyLabel: apiKeys.label, tenantId: apiKeys.tenantId })
     .from(apiKeys)
     .where(eq(apiKeys.keyHash, keyHash))
     .limit(1)
@@ -63,4 +65,5 @@ export async function authenticate(
   }
 
   req.tenant = { ...tenant, usage: quota.used };
+  req.apiKey = { id: row.apiKeyId, label: row.keyLabel };
 }

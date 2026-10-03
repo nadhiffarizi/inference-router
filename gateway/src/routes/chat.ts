@@ -69,7 +69,7 @@ export function registerChatRoute(
         // No candidate produced output — nothing streamed yet, so fail as JSON-shaped SSE then end.
         writeEvent(reply, { type: "error", data: errorBody("backend_unavailable", `no backend served the request: ${outcome.lastError}`, { plan: outcome.steps }) });
         await recordRequest({
-          tenantId: tenant.id, capability: "chat", backendId: "none", modelId: "none",
+          tenantId: tenant.id, capability: "chat", ...reqKey(req), backendId: "none", modelId: "none",
           promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
           estimatedCostUsd: 0, outcome: "failed", error: outcome.lastError,
         }, requestId);
@@ -101,7 +101,7 @@ export function registerChatRoute(
       const costUsd = usage.costUsd ?? estimateCost(outcome.chosen.meta.pricePerMTokens, usage);
       const priceExact = usage.costUsd !== undefined;
       await recordRequest({
-        tenantId: tenant.id, capability: "chat", backendId: outcome.chosen.meta.id,
+        tenantId: tenant.id, capability: "chat", ...reqKey(req), backendId: outcome.chosen.meta.id,
         modelId: outcome.chosen.meta.modelId, promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
         outcome: streamError ? "failed" : "ok", error: streamError,
@@ -128,4 +128,9 @@ export function registerChatRoute(
       closeSse(reply);
     },
   );
+}
+
+/** The issued key that authenticated this request (for per-key usage). */
+function reqKey(req: { apiKey?: { id: number; label: string } }): { apiKeyId?: number; keyLabel?: string } {
+  return req.apiKey ? { apiKeyId: req.apiKey.id, keyLabel: req.apiKey.label } : {};
 }

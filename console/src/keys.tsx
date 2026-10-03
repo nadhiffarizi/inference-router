@@ -3,6 +3,10 @@ import { Copy, Plus } from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "./components/ui/dialog";
+import { Input } from "./components/ui/input";
 
 /**
  * API-keys screen: issue a key (plaintext shown/copied exactly once), then
@@ -62,10 +66,21 @@ export function ApiKeysView(): React.ReactElement {
   const { keys, endpoints, issue, error } = useKeys();
   const [fresh, setFresh] = useState<string | null>(null); // plaintext shown once
   const [copied, setCopied] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  async function generate(): Promise<void> {
-    const issued = await issue();
-    if (issued) setFresh(issued.apiKey);
+  async function issueNamed(): Promise<void> {
+    const label = name.trim();
+    if (!label) return;
+    setBusy(true);
+    const issued = await issue(label);
+    setBusy(false);
+    if (issued) {
+      setFresh(issued.apiKey);
+      setDialogOpen(false);
+      setName("");
+    }
   }
 
   async function copy(text: string, what: string): Promise<void> {
@@ -83,11 +98,42 @@ export function ApiKeysView(): React.ReactElement {
         <CardContent>
           <p className="mb-4 text-sm text-muted-foreground">
             The playground needs a key to call the gateway. Issue one, copy it, paste it into the playground
-            — exactly how a product team integrates.
+            — exactly how a product team integrates. Keys are tracked by NAME in usage and observability.
           </p>
-          <Button size="sm" onClick={() => void generate()}>
-            <Plus className="size-3.5" /> Generate API key
+          <Button size="sm" onClick={() => setDialogOpen(true)}>
+            <Plus className="size-3.5" /> Issue a key
           </Button>
+
+          {/* named-issue dialog, openrouter-style */}
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Issue a key</DialogTitle>
+                <DialogDescription>
+                  Give it a name you'll recognize in the usage and observability views — e.g. <code>mobile-app-prod</code>.
+                </DialogDescription>
+              </DialogHeader>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void issueNamed();
+                }}
+                className="space-y-3"
+              >
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="key name"
+                  autoFocus
+                  maxLength={80}
+                  required
+                />
+                <Button type="submit" className="w-full" disabled={busy || !name.trim()}>
+                  {busy ? "issuing…" : "Create key"}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
 
           {fresh && (
             <div className="mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3">
@@ -105,14 +151,14 @@ export function ApiKeysView(): React.ReactElement {
 
           <div className="mt-4">
             {keys.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No keys yet — generate one to start.</p>
+              <p className="text-sm text-muted-foreground">No keys yet — issue one to start.</p>
             ) : (
               <ul className="divide-y">
                 {keys.map((k) => (
                   <li key={k.id} className="flex items-center justify-between gap-3 py-2">
                     <div className="min-w-0">
-                      <p className="font-mono text-sm">{k.maskedKey}</p>
-                      <p className="text-xs text-muted-foreground">{k.label}</p>
+                      <p className="truncate text-sm font-medium">{k.label}</p>
+                      <p className="font-mono text-xs text-muted-foreground">{k.maskedKey}</p>
                     </div>
                     <Badge variant="secondary">active</Badge>
                   </li>

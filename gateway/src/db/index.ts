@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS requests (
   id TEXT PRIMARY KEY,
   tenant_id INTEGER NOT NULL,
   capability TEXT NOT NULL,
+  api_key_id INTEGER,
+  key_label TEXT,
   backend_id TEXT NOT NULL,
   model_id TEXT NOT NULL,
   prompt_tokens INTEGER NOT NULL DEFAULT 0,
@@ -110,6 +112,8 @@ export function bootstrapDatabase(): void {
   for (const stmt of [
     "ALTER TABLE tenants ADD COLUMN budget_usd_per_day REAL NOT NULL DEFAULT 1.0",
     "ALTER TABLE api_keys ADD COLUMN masked_key TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE requests ADD COLUMN api_key_id INTEGER",
+    "ALTER TABLE requests ADD COLUMN key_label TEXT",
   ]) {
     try {
       sqlite.exec(stmt);

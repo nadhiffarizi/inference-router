@@ -19,6 +19,7 @@ type OwnTenantUsage = {
   quota: { requestsPerDay: number; tokensPerDay: number; budgetUsdPerDay: number };
   remaining: { requests: number; tokens: number; budgetUsd: number };
   totals: { requests: number; costUsd: number };
+  keyUsage?: { label: string; maskedKey: string | null; requests: number; tokens: number; costUsd: number }[];
   decisions: {
     requestId: string;
     capability: string;
@@ -57,6 +58,36 @@ export function UsageView(): React.ReactElement {
         <Stat label="spend today" value={usd(data.today.costsUsd)} sub={`of $${data.quota.budgetUsdPerDay.toFixed(2)}`} highlight={data.remaining.budgetUsd === 0} />
         <Stat label="remaining today" value={usd(data.remaining.budgetUsd)} sub={`${data.remaining.requests} requests · ${data.remaining.tokens} tokens`} />
       </div>
+
+      {data.keyUsage && data.keyUsage.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Per key (today)</h2>
+          <Card className="overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>key name</TableHead>
+                  <TableHead>key</TableHead>
+                  <TableHead className="text-right">requests</TableHead>
+                  <TableHead className="text-right">tokens</TableHead>
+                  <TableHead className="text-right">spend</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.keyUsage.map((k) => (
+                  <TableRow key={`${k.label}-${k.maskedKey ?? ""}`}>
+                    <TableCell className="font-medium">{k.label}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{k.maskedKey ?? "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{k.requests}</TableCell>
+                    <TableCell className="text-right tabular-nums">{k.tokens}</TableCell>
+                    <TableCell className="text-right tabular-nums">{usd(k.costUsd)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        </section>
+      )}
 
       <Card>
         <CardContent className="p-0">

@@ -21,6 +21,7 @@ type Observability = {
     remaining: { requests: number; tokens: number; budgetUsd: number };
     totals: { requests: number; costUsd: number };
   }[];
+  keys?: { tenant: string; label: string; maskedKey: string | null; requests: number; tokens: number; costUsd: number }[];
   decisions: {
     requestId: string;
     tenantId: number;
@@ -113,6 +114,48 @@ export function ObservabilityView(): React.ReactElement {
           ))}
         </div>
       </section>
+
+      {data.keys && data.keys.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Per key (today, all tenants)</h2>
+          <Card className="overflow-hidden hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>tenant</TableHead>
+                  <TableHead>key name</TableHead>
+                  <TableHead className="text-right">requests</TableHead>
+                  <TableHead className="text-right">spend</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.keys.map((k) => (
+                  <TableRow key={`${k.tenant}-${k.label}`}>
+                    <TableCell className="font-medium">{k.tenant}</TableCell>
+                    <TableCell>
+                      {k.label}
+                      {k.maskedKey && <span className="ml-2 font-mono text-xs text-muted-foreground">{k.maskedKey}</span>}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{k.requests}</TableCell>
+                    <TableCell className="text-right tabular-nums">{usd(k.costUsd)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+          <div className="grid gap-3 md:hidden">
+            {data.keys.map((k) => (
+              <div key={`${k.tenant}-${k.label}`} className="rounded-xl border p-4">
+                <div className="flex items-center justify-between">
+                  <p className="font-medium">{k.label}</p>
+                  <Badge variant="secondary">{k.requests} req</Badge>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">{k.tenant} · {usd(k.costUsd)}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Routing decisions (latest 25, all tenants)</h2>

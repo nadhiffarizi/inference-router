@@ -17,6 +17,8 @@ export type PlanStep = {
 export type MeteredResult = {
   tenantId: number;
   capability: string;
+  apiKeyId?: number;
+  keyLabel?: string;
   backendId: string;
   modelId: string;
   promptTokens: number;

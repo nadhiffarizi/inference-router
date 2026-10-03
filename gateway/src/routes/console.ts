@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { db } from "../db/index.js";
 import { apiKeys, requests, routingDecisions, tenants } from "../db/schema.js";
@@ -74,6 +74,50 @@ async function tenantUsage(tenantId: number) {
 }
 
 
+/** Per-KEY usage (openrouter-style): requests + spend grouped by key name. */
+async function keyUsage(tenantId: number) {
+  const day = utcDay();
+  const rows = await db
+    .select({
+      label: requests.keyLabel,
+      apiKeyId: requests.apiKeyId,
+      requests: sql<number>`count(*)`,
+      tokens: sql<number>`coalesce(sum(${requests.promptTokens} + ${requests.completionTokens}), 0)`,
+      costUsd: sql<number>`coalesce(sum(${requests.estimatedCostUsd}), 0)`,
+    })
+    .from(requests)
+    .where(and(eq(requests.tenantId, tenantId), sql`substr(${requests.createdAt}, 1, 10) = ${day}`))
+    .groupBy(requests.apiKeyId);
+
+  // Attach still-listed labels from the keys table (deleted/renamed rows keep their metered label).
+  const named = await db
+    .select({ id: apiKeys.id, label: apiKeys.label, maskedKey: apiKeys.maskedKey, createdAt: apiKeys.createdAt })
+    .from(apiKeys)
+    .where(eq(apiKeys.tenantId, tenantId))
+    .orderBy(desc(apiKeys.id));
+  const byMeteredLabel = new Map(rows.map((r) => [r.label ?? "unknown", r]));
+
+  const out: {
+    label: string; maskedKey: string | null; requests: number; tokens: number; costUsd: number; active: boolean;
+  }[] = [];
+  for (const k of named) {
+    const metered = byMeteredLabel.get(k.label);
+    out.push({
+      label: k.label,
+      maskedKey: k.maskedKey,
+      requests: metered?.requests ?? 0,
+      tokens: metered?.tokens ?? 0,
+      costUsd: metered?.costUsd ?? 0,
+      active: true,
+    });
+    if (metered) byMeteredLabel.delete(k.label);
+  }
+  for (const [label, m] of byMeteredLabel) {
+    out.push({ label: label ?? "unknown", maskedKey: null, requests: m.requests, tokens: m.tokens, costUsd: m.costUsd, active: false });
+  }
+  return out;
+}
+
 function plainDecision(r: typeof routingDecisions.$inferSelect) {
   return {
     requestId: r.requestId,
@@ -137,7 +181,9 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
 
   /** Product team's own usage slice. */
   app.get("/v1/console/usage", { onRequest: consoleRoute }, async (req) => {
-    return tenantUsage(reqUser(req).tenant.id);
+    const tenantId = reqUser(req).tenant.id;
+    const summary = await tenantUsage(tenantId);
+    return { ...summary, keyUsage: await keyUsage(tenantId) };
   });
 
   /** Admin-only: cross-tenant usage + the routing decision log. */
@@ -159,7 +205,17 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
       .orderBy(desc(routingDecisions.id))
       .limit(25)
       .then((rows) => rows.map(plainDecision));
-    return { tenants: tenantsSummary, decisions };
+
+    // Per-key usage across ALL tenants (openrouter-style: track by name, not key string).
+    const fleetKeys: Awaited<ReturnType<typeof keyUsage>> = [];
+    for (const t of all) {
+      try {
+        fleetKeys.push(...(await keyUsage(t.id)).map((k) => ({ ...k, tenant: t.name })));
+      } catch {
+        /* skip broken tenant */
+      }
+    }
+    return { tenants: tenantsSummary, keys: fleetKeys, decisions };
   });
 }
 
