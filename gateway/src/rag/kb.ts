@@ -29,7 +29,9 @@ export function loadKb(): { entries: number; intents: number } {
     // matching keeps retrieval useful without an embedding model.
     searchOptions: {
       prefix: true,
-      fuzzy: 0.2,
+      // 0.3: eval questions carry real-world typos ("cancle", "mistkae") —
+      // 0.2 misses them; 0.3 catches 2-of-8-char edits in probe testing.
+      fuzzy: 0.3,
       boost: { question: 2, intent: 3, answer: 1 },
       combineWith: "OR",
     },

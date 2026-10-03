@@ -35,7 +35,7 @@ export function buildTable(a: RunSummary, b: RunSummary): string {
     row("avg latency (ms)", fmt(a.metrics.avgLatencyMs), fmt(b.metrics.avgLatencyMs), (a.metrics.avgLatencyMs <= b.metrics.avgLatencyMs ? "A" : "B")),
     row("p95 latency (ms)", fmt(a.metrics.p95LatencyMs), fmt(b.metrics.p95LatencyMs), (a.metrics.p95LatencyMs <= b.metrics.p95LatencyMs ? "A" : "B")),
     row("total cost (USD)", fmt(a.metrics.totalCostUsd, 5), fmt(b.metrics.totalCostUsd, 5), (a.metrics.totalCostUsd <= b.metrics.totalCostUsd ? "A" : "B")),
-    row("avg groundedness (1–5)", a.metrics.avgGroundedness == null ? "n/a" : fmt(a.metrics.avgGroundedness, 2), b.metrics.avgGroundedness == null ? "n/a" : fmt(b.metrics.avgGroundedness, 2), a.metrics.avgGroundedness != null && b.metrics.avgGroundedness != null && a.metrics.avgGroundedness >= b.metrics.avgGroundedness ? "A" : "B"),
+    row("avg groundedness (1–5)", a.metrics.avgGroundedness == null ? "n/a" : fmt(a.metrics.avgGroundedness, 2), b.metrics.avgGroundedness == null ? "n/a" : fmt(b.metrics.avgGroundedness, 2), a.metrics.avgGroundedness == null || b.metrics.avgGroundedness == null ? "—" : a.metrics.avgGroundedness >= b.metrics.avgGroundedness ? "A" : "B"),
   ];
   return lines.join("\n") + "\n";
 }

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { CaseResult } from "./data.js";
 
 /**
@@ -15,7 +17,10 @@ const MODEL = process.env.JUDGE_MODEL?.trim() || "google/gemini-2.5-flash-lite";
 type JudgeVerdict = { score: number; comment: string };
 
 export async function judgeAll(results: CaseResult[]): Promise<Map<string, JudgeVerdict>> {
-  const key = process.env.OPENROUTER_API_KEY?.trim();
+  const key =
+    process.env.OPENROUTER_API_KEY?.trim() ||
+    // gateway/.env is the canonical key location in this repo
+    readFileSync(path.resolve("../gateway/.env"), "utf8").match(/^OPENROUTER_API_KEY=(.+)$/m)?.[1]?.trim();
   if (!key || key.startsWith("PLACEHOLDER")) {
     throw new Error("no OPENROUTER_API_KEY — skipping judge");
   }
@@ -45,7 +50,7 @@ async function judge(key: string, r: CaseResult): Promise<JudgeVerdict> {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, "HTTP-Referer": "http://localhost", "X-Title": "Mini Inference Router eval" },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 220,
+      max_tokens: 400,
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
@@ -67,7 +72,9 @@ async function judge(key: string, r: CaseResult): Promise<JudgeVerdict> {
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("judge empty response");
-  const parsed = JSON.parse(content) as { score?: number; comment?: string };
+  // Models sometimes wrap/fence/trim JSON; take the first {...} block.
+  const jsonish = content.slice(content.indexOf("{"), content.lastIndexOf("}") + 1);
+  const parsed = JSON.parse(jsonish) as { score?: number; comment?: string };
   const score = Math.max(1, Math.min(5, Number(parsed.score) || 0));
   return { score, comment: parsed.comment ?? "" };
 }

@@ -93,7 +93,7 @@ export const config = {
     topK: num("RETRIEVAL_TOP_K", 5),
     /** Below this normalized confidence the assistant refuses instead of guessing.
      *  Calibrated against probe data: on-KB ≈ 0.48–0.79, off-KB ≈ 0.04–0.37 (rag/kb.ts). */
-    refuseBelowConfidence: num("RETRIEVAL_REFUSE_BELOW", 0.42),
+    refuseBelowConfidence: num("RETRIEVAL_REFUSE_BELOW", 0.48),
   },
 
   /** Seed tenants are fixtures (DECISIONS.md D10 — no tenant CRUD UI). */

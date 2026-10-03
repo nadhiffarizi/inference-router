@@ -26,7 +26,9 @@ const DATASET = "bitext/Bitext-customer-support-llm-chatbot-training-dataset";
  * misses 24 intents). Cached to data/raw.csv after the first run.
  */
 const CSV_URL = `https://huggingface.co/datasets/${DATASET}/resolve/main/Bitext_Sample_Customer_Support_Training_Dataset_27K_responses-v11.csv`;
-const KB_PER_INTENT = 4;
+/** 12 rows/intent ≈ 324 KB rows: more phrasing variants per intent so lexical
+ *  retrieval catches typos and paraphrases; still a "slice", not the dataset. */
+const KB_PER_INTENT = 12;
 const EVAL_SIZE = 30;
 
 type Row = { instruction: string; response: string; intent: string; category: string };
