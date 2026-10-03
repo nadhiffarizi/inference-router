@@ -55,6 +55,7 @@ export async function authenticate(
       limit: {
         requestsPerDay: tenant.requestsPerDay,
         tokensPerDay: tenant.tokensPerDay,
+        budgetUsdPerDay: tenant.budgetUsdPerDay,
       },
       used: quota.used,
       reset: "UTC midnight",

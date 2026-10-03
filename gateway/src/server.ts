@@ -1,19 +1,21 @@
 import cors from "@fastify/cors";
-import { randomUUID } from "node:crypto";
+import cookie from "@fastify/cookie";
+import { createHash, randomUUID } from "node:crypto";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { bootstrapDatabase, db, wasFreshDatabase } from "./db/index.js";
-import { apiKeys, kbEntries, tenants } from "./db/schema.js";
+import { apiKeys, kbEntries, tenants, users } from "./db/schema.js";
+import { eq } from "drizzle-orm";
 import { config } from "./config.js";
 import { registerChatRoute } from "./routes/chat.js";
 import { registerAssistantRoute } from "./routes/assistant.js";
-import { registerUsageRoutes } from "./routes/usage.js";
+import { registerConsoleRoutes } from "./routes/console.js";
 import { makeOpenRouterAdapter } from "./backends/openrouter.js";
 import { makeMockAdapter } from "./backends/mock.js";
 import { adapterRegistry } from "./routing/dispatch.js";
 import type { AdapterMeta, ModelAdapter } from "./backends/types.js";
 import { loadKb } from "./rag/kb.js";
 import { errorBody, GatewayError } from "./lib/errors.js";
-import { createHash } from "node:crypto";
+import { hashPassword, maskKey } from "./lib/password.js";
 
 /**
  * Composition root. Boot order matters and is linear on purpose:
@@ -35,6 +37,7 @@ async function seedTenantsIfFresh(): Promise<void> {
         name: seed.name,
         requestsPerDay: seed.requestsPerDay ?? config.quota.requestsPerDay,
         tokensPerDay: config.quota.tokensPerDay,
+        budgetUsdPerDay: seed.budgetUsdPerDay ?? config.quota.budgetUsdPerDay,
         createdAt: now,
       })
       .returning({ id: tenants.id })
@@ -43,7 +46,32 @@ async function seedTenantsIfFresh(): Promise<void> {
     await db.insert(apiKeys).values({
       tenantId,
       keyHash: createHash("sha256").update(seed.key).digest("hex"),
+      maskedKey: maskKey(seed.key),
       label: `default (${seed.name})`,
+      createdAt: now,
+    });
+  }
+}
+
+async function seedUsersIfFresh(): Promise<void> {
+  if (!wasFreshDatabase()) return;
+  const now = new Date().toISOString();
+  for (const seed of config.seedUsers) {
+    const tenant = await db
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.name, seed.tenantName))
+      .limit(1)
+      .then((r) => r[0]);
+    if (!tenant) {
+      console.warn({ msg: `seed user skipped — tenant "${seed.tenantName}" not among seeded tenants`, email: seed.email });
+      continue;
+    }
+    await db.insert(users).values({
+      email: seed.email.toLowerCase(),
+      passwordHash: hashPassword(seed.password),
+      role: seed.role,
+      tenantId: tenant.id,
       createdAt: now,
     });
   }
@@ -79,14 +107,17 @@ function buildAdapters(): Map<string, ModelAdapter> {
 async function main(): Promise<void> {
   bootstrapDatabase();
   await seedTenantsIfFresh();
+  await seedUsersIfFresh();
   await loadKbEntriesIfFresh();
 
   const app = Fastify({
     logger: { level: process.env.LOG_LEVEL?.trim() || "info" },
+    trustProxy: true, // behind NGINX — req.protocol/ip come from the proxy
     genReqId: () => randomUUID(),
     bodyLimit: 1 * 1024 * 1024,
   });
   await app.register(cors, { origin: true });
+  await app.register(cookie, {});
 
   const byId = buildAdapters();
   const kb = loadKb();
@@ -94,7 +125,7 @@ async function main(): Promise<void> {
 
   registerChatRoute(app, byId, SYSTEM_PROMPT);
   registerAssistantRoute(app, byId);
-  registerUsageRoutes(app);
+  registerConsoleRoutes(app);
 
   // Structured errors for every non-stream failure path (auth, quota, JSON
   // validation): machine-readable {error:{code,message,...}} per DECISIONS.

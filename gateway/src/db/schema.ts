@@ -7,14 +7,41 @@ export const tenants = sqliteTable("tenants", {
   name: text("name").notNull().unique(),
   requestsPerDay: integer("requests_per_day").notNull(),
   tokensPerDay: integer("tokens_per_day").notNull(),
+  /** Daily spend budget in USD — quota currency is dollars (admin/team decision 2026-10-03). */
+  budgetUsdPerDay: real("budget_usd_per_day").notNull().default(1.0),
   createdAt: text("created_at").notNull(),
 });
 
-/** Keys stored as SHA-256 hex — plaintext never touches the DB. */
+/**
+ * Console operators. Every user belongs to exactly one tenant — admin is a
+ * tenant like any other; its role only adds the Observability menu and
+ * cross-tenant read access, nothing changes in the tenancy model.
+ */
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  email: text("email").notNull().unique(),
+  /** scrypt: "salt:hex" format (node:crypto, no dependency). */
+  passwordHash: text("password_hash").notNull(),
+  /** admin | product */
+  role: text("role").notNull(),
+  tenantId: integer("tenant_id").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+/** Opaque session tokens (cookie value = token); long-lived by design for this demo. */
+export const sessions = sqliteTable("sessions", {
+  token: text("token").primaryKey(),
+  userId: integer("user_id").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+/** Keys stored as SHA-256 hex — plaintext never touches the DB; masked copy for display. */
 export const apiKeys = sqliteTable("api_keys", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   tenantId: integer("tenant_id").notNull(),
   keyHash: text("key_hash").notNull().unique(),
+  maskedKey: text("masked_key").notNull().default(""),
   label: text("label").notNull(),
   createdAt: text("created_at").notNull(),
 });

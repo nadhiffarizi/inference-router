@@ -10,6 +10,7 @@
     "build:kb": "tsx src/scripts/buildKb.ts"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^10.0.1",
     "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.36.4",

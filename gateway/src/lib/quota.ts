@@ -1,11 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { quotaUsage } from "../db/schema.js";
+import { quotaUsage, requests } from "../db/schema.js";
 
 /**
- * Fixed-window (UTC day) quota. Deliberately simple (DECISIONS.md D10):
- * two counters — requests and tokens — checked before dispatch and bumped
- * after metering.
+ * Fixed-window (UTC day) quota. Deliberately simple (DECISIONS.md D10).
+ * Counters: requests/day (bumped after metering), tokens/day, and since the
+ * console redesign, a USD spend budget/day (computed from the metering
+ * rows — the same currency the system actually records, no credits layer).
  *
  * "Fails closed" has two layers here:
  *  1. Over limit → deny with a clear 429 (the brief's explicit ask).
@@ -18,13 +19,14 @@ export type TenantRow = {
   name: string;
   requestsPerDay: number;
   tokensPerDay: number;
+  budgetUsdPerDay: number;
   createdAt?: string;
-  usage?: { requestCount: number; tokensTotal: number; day: string };
+  usage?: { requestCount: number; tokensTotal: number; usdSpend: number; day: string };
 };
 
 export type QuotaVerdict =
-  | { allowed: true; used: { requestCount: number; tokensTotal: number; day: string } }
-  | { allowed: false; reason: string; used: { requestCount: number; tokensTotal: number; day: string } };
+  | { allowed: true; used: { requestCount: number; tokensTotal: number; usdSpend: number; day: string } }
+  | { allowed: false; reason: string; used: { requestCount: number; tokensTotal: number; usdSpend: number; day: string } };
 
 export function utcDay(now = new Date()): string {
   return now.toISOString().slice(0, 10);
@@ -32,7 +34,7 @@ export function utcDay(now = new Date()): string {
 
 export async function readUsage(
   tenantId: number,
-): Promise<{ requestCount: number; tokensTotal: number; day: string }> {
+): Promise<{ requestCount: number; tokensTotal: number; usdSpend: number; day: string }> {
   const day = utcDay();
   const row = await db
     .select()
@@ -40,11 +42,24 @@ export async function readUsage(
     .where(and(eq(quotaUsage.tenantId, tenantId), eq(quotaUsage.day, day)))
     .limit(1)
     .then((r) => r[0]);
-  return { requestCount: row?.requestCount ?? 0, tokensTotal: row?.tokensTotal ?? 0, day };
+
+  // Daily USD spend from metering rows — single source of truth for cost.
+  const spend = await db
+    .select({ costUsd: sql<number>`coalesce(sum(${requests.estimatedCostUsd}), 0)` })
+    .from(requests)
+    .where(and(eq(requests.tenantId, tenantId), sql`substr(${requests.createdAt}, 1, 10) = ${day}`))
+    .then((r) => r[0]?.costUsd ?? 0);
+
+  return {
+    requestCount: row?.requestCount ?? 0,
+    tokensTotal: row?.tokensTotal ?? 0,
+    usdSpend: spend,
+    day,
+  };
 }
 
 export async function checkQuota(
-  tenant: Pick<TenantRow, "id" | "requestsPerDay" | "tokensPerDay">,
+  tenant: Pick<TenantRow, "id" | "requestsPerDay" | "tokensPerDay" | "budgetUsdPerDay">,
 ): Promise<QuotaVerdict> {
   try {
     const used = await readUsage(tenant.id);
@@ -53,6 +68,13 @@ export async function checkQuota(
     }
     if (used.tokensTotal >= tenant.tokensPerDay) {
       return { allowed: false, reason: "Daily token quota exhausted.", used };
+    }
+    if (tenant.budgetUsdPerDay > 0 && used.usdSpend >= tenant.budgetUsdPerDay) {
+      return {
+        allowed: false,
+        reason: `Daily spending budget ($${tenant.budgetUsdPerDay}) exhausted.`,
+        used,
+      };
     }
     return { allowed: true, used };
   } catch (err) {

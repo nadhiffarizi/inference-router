@@ -30,6 +30,7 @@ export const errors = {
   invalidInput: (message: string, details?: Record<string, unknown>) =>
     new GatewayError(400, "invalid_input", message, details),
   unauthorized: (message: string) => new GatewayError(401, "unauthorized", message),
+  forbidden: (message: string) => new GatewayError(403, "forbidden", message),
   quotaExceeded: (message: string, details?: Record<string, unknown>) =>
     new GatewayError(429, "quota_exceeded", message, details),
   quotaUncertain: (message: string) => new GatewayError(503, "quota_uncertain", message),

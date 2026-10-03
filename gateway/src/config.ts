@@ -36,6 +36,8 @@ function req(name: string): string {
   return raw;
 }
 
+const config_defaults = { requestQuota: 200 };
+
 export const config = {
   port: num("PORT", 8787),
   dbPath: process.env.DB_PATH?.trim() || "data/gateway.sqlite",
@@ -86,6 +88,8 @@ export const config = {
   quota: {
     requestsPerDay: num("QUOTA_REQUESTS_PER_DAY", 200),
     tokensPerDay: num("QUOTA_TOKENS_PER_DAY", 500_000),
+    /** Quota currency is USD (no credits layer — same unit the metering records). */
+    budgetUsdPerDay: num("QUOTA_BUDGET_USD_PER_DAY", 1),
   },
 
   assistant: {
@@ -96,15 +100,41 @@ export const config = {
     refuseBelowConfidence: num("RETRIEVAL_REFUSE_BELOW", 0.48),
   },
 
-  /** Seed tenants are fixtures (DECISIONS.md D10 — no tenant CRUD UI). */
+  /** Seed tenants are fixtures (DECISIONS.md D10 — no tenant CRUD UI).
+   *  Format: "name:key:requestsPerDay:budgetUsdPerDay" — quota currency is USD. */
   seedTenants: (process.env.SEED_TENANTS?.trim() ||
-    "demo:sk_demo_key_0000000000000000:200, stress:sk_stress_key_0000000000000000:3")
+    "ops:sk_ops_key_000000000000000000000:500:10, demo:sk_demo_key_0000000000000000:200:1, stress:sk_stress_key_0000000000000000:3:0.05")
     .split(",")
     .map((entry) => {
-      const [name, key, quota] = entry.split(":");
-      if (!name || !key) throw new Error(`Env SEED_TENANTS entries must be "name:key:quotaPerDay"`);
-      return { name, key, requestsPerDay: Number(quota) || undefined };
+      const [name, key, requests, budget] = entry.split(":");
+      if (!name || !key) throw new Error(`Env SEED_TENANTS entries must be "name:key:requestsPerDay:budgetUsdPerDay"`);
+      return {
+        name: name.trim(),
+        key: key.trim(),
+        requestsPerDay: Number(requests) || config_defaults.requestQuota,
+        budgetUsdPerDay: budget !== undefined && budget !== "" ? Number(budget) : null,
+      };
     }),
+
+  /** Console accounts: "email:password:role:tenantName". Shared demo creds are fine. */
+  seedUsers: (process.env.SEED_USERS?.trim() ||
+    "admin@demo.local:mekari-demo-2026:admin:ops, team@demo.local:mekari-demo-2026:product:demo")
+    .split(",")
+    .map((entry) => {
+      const [email, password, role, tenantName] = entry.split(":");
+      if (!email || !password || !role || !tenantName) {
+        throw new Error(`Env SEED_USERS entries must be "email:password:role:tenantName"`);
+      }
+      if (role !== "admin" && role !== "product") throw new Error(`Role must be admin|product, got ${role}`);
+      return { email: email.trim(), password, role, tenantName: tenantName.trim() };
+    }),
+
+  sessionCookie: {
+    name: "session",
+    days: 30,
+    /** Set when a proxy (NGINX+Cloudflare) terminates TLS in front of the origin. */
+    secure: process.env.COOKIE_SECURE?.trim() === "true",
+  },
 };
 
 function priceEnv(prefix: string, fallback: { input: number; output: number }) {

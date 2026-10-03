@@ -26,12 +26,28 @@ CREATE TABLE IF NOT EXISTS tenants (
   name TEXT NOT NULL UNIQUE,
   requests_per_day INTEGER NOT NULL,
   tokens_per_day INTEGER NOT NULL,
+  budget_usd_per_day REAL NOT NULL DEFAULT 1.0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL,
+  tenant_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  expires_at TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS api_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id INTEGER NOT NULL,
   key_hash TEXT NOT NULL UNIQUE,
+  masked_key TEXT NOT NULL DEFAULT '',
   label TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
@@ -89,6 +105,18 @@ export const db: Db = drizzle(sqlite);
 
 export function bootstrapDatabase(): void {
   sqlite.exec(DDL);
+  // Column migrations for pre-existing databases: SQLite ALTER TABLE ADD
+  // COLUMN errors if it exists, which is the idempotence mechanism here.
+  for (const stmt of [
+    "ALTER TABLE tenants ADD COLUMN budget_usd_per_day REAL NOT NULL DEFAULT 1.0",
+    "ALTER TABLE api_keys ADD COLUMN masked_key TEXT NOT NULL DEFAULT ''",
+  ]) {
+    try {
+      sqlite.exec(stmt);
+    } catch {
+      /* column already present */
+    }
+  }
 }
 
 export function wasFreshDatabase(): boolean {
