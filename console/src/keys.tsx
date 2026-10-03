@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Plus } from "lucide-react";
+import { Copy, KeyRound, RefreshCw } from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -9,8 +9,9 @@ import {
 import { Input } from "./components/ui/input";
 
 /**
- * API-keys screen: issue a key (plaintext shown/copied exactly once), then
- * see the masked forms + the endpoint URLs to integrate against.
+ * API-keys screen — one account, one active key (openrouter-simple):
+ * no key yet → issue (named dialog); key exists → masked + named, and
+ * "regenerate" rotates (old key dies instantly; its metered history stays).
  */
 
 export type KeyRow = { id: number; maskedKey: string; label: string; createdAt: string };
@@ -70,6 +71,8 @@ export function ApiKeysView(): React.ReactElement {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const active = keys[0];
+
   async function issueNamed(): Promise<void> {
     const label = name.trim();
     if (!label) return;
@@ -93,24 +96,45 @@ export function ApiKeysView(): React.ReactElement {
     <div className="mx-auto max-w-3xl space-y-5 pt-5">
       <Card>
         <CardHeader>
-          <CardTitle>api keys</CardTitle>
+          <CardTitle>API key</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="mb-4 text-sm text-muted-foreground">
-            The playground needs a key to call the gateway. Issue one, copy it, paste it into the playground
-            — exactly how a product team integrates. Keys are tracked by NAME in usage and observability.
+            One account, one key. It authenticates product flows to the gateway and is tracked by name in
+            usage and observability. Lost it? Regenerate — the old key stops working immediately.
           </p>
-          <Button size="sm" onClick={() => setDialogOpen(true)}>
-            <Plus className="size-3.5" /> Issue a key
-          </Button>
 
-          {/* named-issue dialog, openrouter-style */}
+          {active ? (
+            <div className="rounded-lg border p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{active.label}</p>
+                  <p className="font-mono text-xs text-muted-foreground">{active.maskedKey}</p>
+                </div>
+                <Badge variant="success">active</Badge>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">issued {active.createdAt.slice(0, 10)}</p>
+              <div className="mt-3">
+                <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)}>
+                  <RefreshCw className="size-3" /> Regenerate key
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <KeyRound className="size-3.5" /> Issue a key
+            </Button>
+          )}
+
+          {/* named-issue / rotate dialog */}
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Issue a key</DialogTitle>
+                <DialogTitle>{active ? "Regenerate key" : "Issue a key"}</DialogTitle>
                 <DialogDescription>
-                  Give it a name you'll recognize in the usage and observability views — e.g. <code>mobile-app-prod</code>.
+                  {active
+                    ? "Your current key is revoked the moment the new one is created — anything still using it gets 401. Name it so you recognize it in usage."
+                    : "Name it so you'll recognize it in the usage and observability views — e.g. mobile-app-prod."}
                 </DialogDescription>
               </DialogHeader>
               <form
@@ -123,13 +147,13 @@ export function ApiKeysView(): React.ReactElement {
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="key name"
+                  placeholder={active ? active.label : "key name"}
                   autoFocus
                   maxLength={80}
                   required
                 />
                 <Button type="submit" className="w-full" disabled={busy || !name.trim()}>
-                  {busy ? "issuing…" : "Create key"}
+                  {busy ? "issuing…" : active ? "Rotate key" : "Create key"}
                 </Button>
               </form>
             </DialogContent>
@@ -148,24 +172,6 @@ export function ApiKeysView(): React.ReactElement {
           )}
 
           {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-
-          <div className="mt-4">
-            {keys.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No keys yet — issue one to start.</p>
-            ) : (
-              <ul className="divide-y">
-                {keys.map((k) => (
-                  <li key={k.id} className="flex items-center justify-between gap-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{k.label}</p>
-                      <p className="font-mono text-xs text-muted-foreground">{k.maskedKey}</p>
-                    </div>
-                    <Badge variant="secondary">active</Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
         </CardContent>
       </Card>
 

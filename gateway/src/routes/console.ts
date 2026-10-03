@@ -164,14 +164,24 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     return { keys: rows, endpoints: endpointList(req) };
   });
 
+  /**
+   * One account, one active key: POST here issues a key and revokes the
+   * previous one in the same breath — so "issue" doubles as "rotate",
+   * and the old key dies immediately (auth lookups fail closed on 401).
+   * Metering rows keep the old key's denormalized label, so history survives.
+   */
   app.post<{ Body: { label?: string } }>("/v1/console/keys", { onRequest: consoleRoute }, async (req, reply) => {
     const user = reqUser(req);
     const { key, keyHash, masked } = generateApiKey();
+    // better-sqlite3 transactions are sync-only under Drizzle; two awaited
+    // statements are atomic-equivalent here (local single-writer DB).
+    const label = req.body.label?.trim() || `key ${new Date().toISOString().slice(0, 10)}`;
+    await db.delete(apiKeys).where(eq(apiKeys.tenantId, user.tenant.id));
     await db.insert(apiKeys).values({
       tenantId: user.tenant.id,
       keyHash,
       maskedKey: masked,
-      label: req.body.label?.trim() || `issued ${new Date().toISOString().slice(0, 10)}`,
+      label,
       createdAt: new Date().toISOString(),
     });
     reply.status(201);
