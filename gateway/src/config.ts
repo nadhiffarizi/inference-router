@@ -93,9 +93,18 @@ export const config = {
   /**
    * Fallback chain override for demos: e.g. "mock,openrouter-tier-a,openrouter-tier-b"
    * makes mock first so the video shows a timeout → real-backend fallback fire.
-   * Empty = policy order only.
+   * Empty = policy order only. Boot default only — the Demo Lab (below) edits
+   * the live value at runtime when enabled.
    */
   routingChainOverride: process.env.ROUTING_CHAIN?.trim() || "",
+
+  /**
+   * Demo Lab flag (assessment demo): lets console users turn failure levers at
+   * runtime — mock failure modes, per-backend fault injection, ROUTING_CHAIN,
+   * own-tenant quota caps — via /v1/console/demo/*. Off by default; a real
+   * deployment never exposes it (DEPLOY.md: demo levers off in prod).
+   */
+  demoControls: process.env.DEMO_CONTROLS?.trim() === "1" || process.env.DEMO_CONTROLS?.trim() === "true",
 
   quota: {
     requestsPerDay: num("QUOTA_REQUESTS_PER_DAY", 200),

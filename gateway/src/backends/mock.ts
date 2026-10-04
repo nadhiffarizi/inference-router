@@ -1,4 +1,3 @@
-import { config } from "../config.js";
 import {
   estimateCost,
   type AdapterMeta,
@@ -6,26 +5,28 @@ import {
   type StreamEvent,
   type StreamRequest,
 } from "./types.js";
+import { demoControls } from "../lib/demoControls.js";
 
 /**
  * Mock backend (DECISIONS.md D4): scripted adapter with configurable latency
  * and failure — the brief's own suggestion for demonstrating fallback without
- * burning real quota. Env-configurable per RUN, which is exactly what a demo
- * needs: set MOCK_FAILURE_MODE=hang for the video and the router's timeout →
- * fallback path fires deterministically.
+ * burning real quota. Env-configurable per RUN (MOCK_FAILURE_MODE), and — when
+ * the Demo Lab flag is on — runtime-editable, since the script reads
+ * demoControls (which boots from the env values) each call.
  */
 
 const REPLY = "This is the mock backend answering: the real model path is up and this text proves streaming, metering, and fallback plumbing end to end. ";
 
 export function makeMockAdapter(meta: AdapterMeta): ModelAdapter {
-  const cfg = config.backends.mock;
   return {
     meta,
     async *stream(req: StreamRequest): AsyncGenerator<StreamEvent, void, unknown> {
+      const cfg = demoControls.mock();
+
       await setTimeoutOrAbort(meta.timeoutMs, cfg.firstByteDelayMs);
 
-      // Two failure levers: MOCK_FAILURE_MODE=fail → deterministic failure
-      // (video demo, reproducible); MOCK_FAILURE_RATE=p → probabilistic
+      // Two failure levers: failureMode=fail → deterministic failure
+      // (video demo, reproducible); failureRate=p → probabilistic
       // (exercises the router's fallback on real variation). Both can be 0.
       if (cfg.failureMode === "fail" || Math.random() < cfg.failureRate) {
         throw new Error(`${meta.id} scripted failure (mode=${cfg.failureMode})`);
@@ -35,6 +36,33 @@ export function makeMockAdapter(meta: AdapterMeta): ModelAdapter {
         // Never yields — the adapter-level timeout must abort this.
         await sleep(999_999);
         return; // unreachable, satisfies the generator contract
+      }
+
+      if (cfg.failureMode === "midstream") {
+        // Start answering, then die mid-answer — exercises the router's
+        // "fallback stops at first byte" boundary from inside a stream.
+        const chunks = 2;
+        for (let i = 0; i < chunks; i++) {
+          await setTimeoutOrAbort(meta.timeoutMs, cfg.chunkDelayMs);
+          yield { type: "delta", text: REPLY.slice(i * 24, i * 24 + 24) };
+        }
+        await setTimeoutOrAbort(meta.timeoutMs, cfg.chunkDelayMs);
+        throw new Error(`${meta.id} scripted mid-stream failure`);
+      }
+
+      if (cfg.failureMode === "short") {
+        // A technically-successful but unusable answer (<15 chars) — drives the
+        // route layer's unusable-output refusal without a failure event.
+        await setTimeoutOrAbort(meta.timeoutMs, cfg.chunkDelayMs);
+        yield { type: "delta", text: "ok" };
+        yield {
+          type: "done",
+          usage: {
+            promptTokens: Math.ceil((req.messages.map((m) => m.content).join("\n").length || 1) / 4),
+            completionTokens: 1,
+          },
+        };
+        return;
       }
 
       const words = req.messages.at(-1)?.content ?? REPLY;

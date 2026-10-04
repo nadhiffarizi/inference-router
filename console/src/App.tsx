@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { BarChart3, Eye, KeyRound, MessageSquareText, Network, LogOut } from "lucide-react";
+import { BarChart3, Eye, FlaskConical, KeyRound, MessageSquareText, Network, LogOut } from "lucide-react";
 import { navigate, usePath } from "./router";
 import { AuthProvider, useAuth } from "./auth";
 import { LoginView } from "./login";
@@ -7,6 +7,7 @@ import { Playground } from "./playground";
 import { ApiKeysView } from "./keys";
 import { UsageView } from "./usage";
 import { ObservabilityView } from "./observability";
+import { DemoLab } from "./demo";
 import { Badge } from "./components/ui/badge";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarHeader,
@@ -20,13 +21,14 @@ import { cn, usd } from "./lib/utils";
  * (cross-tenant reads + decision log), enforced server-side.
  */
 
-type Tab = "playground" | "keys" | "usage" | "observability";
+type Tab = "playground" | "keys" | "usage" | "demo" | "observability";
 
 const NAV: {
   id: Tab; path: string; label: string; icon: typeof BarChart3; role: "all" | "admin";
   title: string; subtitle: string;
 }[] = [
   { id: "playground", path: "/playground", label: "Playground", icon: MessageSquareText, role: "all", title: "Playground", subtitle: "support assistant, live through the gateway" },
+  { id: "demo", path: "/demo", label: "Demo Lab", icon: FlaskConical, role: "all", title: "Demo Lab", subtitle: "assessment scenarios — refusal, fallback, quota, auth, fail-closed" },
   { id: "keys", path: "/keys", label: "API Keys", icon: KeyRound, role: "all", title: "API Keys", subtitle: "issue, copy, and the endpoints to integrate against" },
   { id: "usage", path: "/usage", label: "Usage", icon: BarChart3, role: "all", title: "Usage", subtitle: "requests, spend, quota remaining — own tenant" },
   { id: "observability", path: "/observability", label: "Observability", icon: Eye, role: "admin", title: "Observability", subtitle: "all tenants + routing decision log" },
@@ -130,6 +132,7 @@ function Gate(): React.ReactElement {
               : "min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-24 md:px-8 md:pb-10",
           )}>
             {activeTab === "playground" && <Playground />}
+            {activeTab === "demo" && <DemoLab />}
             {activeTab === "keys" && <ApiKeysView />}
             {activeTab === "usage" && <UsageView />}
             {activeTab === "observability" && <ObservabilityView />}

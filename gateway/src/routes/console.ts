@@ -6,6 +6,10 @@ import { apiKeys, chatSessions, requests, routingDecisions, tenants } from "../d
 import { config } from "../config.js";
 import { errorBody, errors } from "../lib/errors.js";
 import { readUsage, utcDay } from "../lib/quota.js";
+import { demoControls, type BackendFault, type MockFailureMode } from "../lib/demoControls.js";
+import { choosePrimary, primaryReason, questionComplexity } from "../routing/rules.js";
+import type { ModelAdapter } from "../backends/types.js";
+import { detectIntent, retrieve } from "../rag/kb.js";
 import { authenticateUser, generateApiKey } from "../lib/password.js";
 import { listSessions, sessionTurns, softDeleteSession } from "../lib/chatSessions.js";
 import {
@@ -207,7 +211,7 @@ function activityRow(
   };
 }
 
-export function registerConsoleRoutes(app: FastifyInstance): void {
+export function registerConsoleRoutes(app: FastifyInstance, byId: Map<string, ModelAdapter>): void {
   app.post<{ Body: { email: string; password: string } }>(
     "/v1/console/login",
     { schema: { body: LoginSchema } },
@@ -387,6 +391,158 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     if (reqUser(req).role !== "admin") throw errors.forbidden("Observability is admin-only.");
     return sessionTurns(Number(req.params.uid)); // cross-tenant: role already verified
   });
+
+  /** ---- Demo Lab (DEMO_CONTROLS=1 only) ----
+      Runtime levers + live scenario probes for the assessment demo. Available
+      to every console session: an assessor drives the demo themselves. The
+      flag is off in real deployments, which 403s everything below. */
+  const demoGate = async (req: FastifyRequest): Promise<void> => {
+    if (!config.demoControls) throw errors.forbidden("Demo Lab is disabled on this deployment (DEMO_CONTROLS).");
+    reqUser(req); // session validity — consoleRoute already resolved it
+  };
+  const backendIds = [...byId.keys()];
+
+  app.get("/v1/console/demo", { onRequest: consoleRoute, preHandler: demoGate }, async (req) => {
+    const user = reqUser(req);
+    const tenantRows = await db
+      .select({ id: tenants.id, name: tenants.name, requestsPerDay: tenants.requestsPerDay, tokensPerDay: tenants.tokensPerDay, budgetUsdPerDay: tenants.budgetUsdPerDay })
+      .from(tenants)
+      .where(user.role === "admin" ? undefined : eq(tenants.id, user.tenant.id))
+      .orderBy(tenants.id);
+    return {
+      enabled: true,
+      settings: demoControls.settings(),
+      backends: [...byId.values()].map((a) => ({ id: a.meta.id, label: a.meta.label, tier: a.meta.tier, modelId: a.meta.modelId, timeoutMs: a.meta.timeoutMs })),
+      thresholds: {
+        refuseBelowConfidence: config.assistant.refuseBelowConfidence,
+        tierBSwapBelowConfidence: config.assistant.tierBSwapBelowConfidence,
+        maxAssistantChars: 4000,
+        maxChatChars: 4000,
+        complexQuestionChars: 240,
+      },
+      tenants: tenantRows,
+    };
+  });
+
+  const DemoSettingsSchema = {
+    type: "object",
+    properties: {
+      routingChain: { type: "string", maxLength: 200 },
+      mock: {
+        type: "object",
+        properties: {
+          failureMode: { enum: ["none", "fail", "hang", "midstream", "short"] },
+          failureRate: { type: "number", minimum: 0, maximum: 1 },
+          firstByteDelayMs: { type: "integer", minimum: 0, maximum: 5000 },
+          chunkDelayMs: { type: "integer", minimum: 0, maximum: 5000 },
+        },
+        additionalProperties: false,
+      },
+      faults: {
+        type: "object",
+        additionalProperties: { enum: ["healthy", "dead", "midstream"] },
+      },
+    },
+    anyOf: [
+      { required: ["routingChain"] },
+      { required: ["mock"] },
+      { required: ["faults"] },
+    ],
+  } as const;
+
+  app.put<{ Body: { routingChain?: string; mock?: Partial<{ failureMode: MockFailureMode; failureRate: number; firstByteDelayMs: number; chunkDelayMs: number }>; faults?: Record<string, BackendFault> } }>(
+    "/v1/console/demo/settings",
+    { schema: { body: DemoSettingsSchema }, onRequest: consoleRoute, preHandler: demoGate },
+    async (req) => {
+      const settings = demoControls.update(req.body, backendIds);
+      return { settings, applied: true };
+    },
+  );
+
+  app.post("/v1/console/demo/reset", { onRequest: consoleRoute, preHandler: demoGate }, async () => {
+    return { settings: demoControls.reset() };
+  });
+
+  const TenantQuotaSchema = {
+    type: "object",
+    properties: {
+      requestsPerDay: { type: "integer", minimum: 1, maximum: 10_000 },
+      tokensPerDay: { type: "integer", minimum: 1, maximum: 10_000_000 },
+      budgetUsdPerDay: { type: "number", minimum: 0, maximum: 1_000 },
+    },
+    additionalProperties: false,
+  } as const;
+
+  app.put<{ Params: { id: string }; Body: { requestsPerDay?: number; tokensPerDay?: number; budgetUsdPerDay?: number } }>(
+    "/v1/console/demo/tenants/:id",
+    { schema: { body: TenantQuotaSchema }, onRequest: consoleRoute, preHandler: demoGate },
+    async (req) => {
+      const user = reqUser(req);
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) throw errors.invalidInput("tenant id must be an integer");
+      // Own tenant only — an assessor demoing quota rules must not reach into
+      // another tenant's budget. Admin is a debugging exception.
+      if (user.role !== "admin" && id !== user.tenant.id) throw errors.forbidden("Demo quota edits apply to your own tenant.");
+      const current = await db.select().from(tenants).where(eq(tenants.id, id)).limit(1).then((r) => r[0]);
+      if (!current) throw errors.invalidInput(`unknown tenant ${id}`);
+      await db
+        .update(tenants)
+        .set({
+          requestsPerDay: req.body.requestsPerDay ?? current.requestsPerDay,
+          tokensPerDay: req.body.tokensPerDay ?? current.tokensPerDay,
+          // budget 0 = "no USD budget" (checkQuota only enforces > 0)
+          budgetUsdPerDay: req.body.budgetUsdPerDay ?? current.budgetUsdPerDay,
+        })
+        .where(eq(tenants.id, id));
+      const updated = await db.select().from(tenants).where(eq(tenants.id, id)).limit(1).then((r) => r[0]!);
+      return {
+        previous: { requestsPerDay: current.requestsPerDay, tokensPerDay: current.tokensPerDay, budgetUsdPerDay: current.budgetUsdPerDay },
+        tenant: updated,
+      };
+    },
+  );
+
+  /**
+   * Confidence probe: retrieval + routing verdict for any question with NO
+   * model call — the refusal floor and the weak band become inspectable.
+   */
+  const ProbeSchema = {
+    type: "object",
+    required: ["question"],
+    properties: { question: { type: "string", minLength: 1, maxLength: 4000 } },
+    additionalProperties: false,
+  } as const;
+
+  app.post<{ Body: { question: string } }>(
+    "/v1/console/demo/probe",
+    { schema: { body: ProbeSchema }, onRequest: consoleRoute, preHandler: demoGate },
+    async (req) => {
+      const { entries, confidence } = retrieve(req.body.question);
+      const { intent } = detectIntent(entries);
+      const ctx = {
+        capability: "support-assistant" as const,
+        question: req.body.question,
+        retrievalConfidence: confidence,
+      };
+      return {
+        question: req.body.question,
+        chars: req.body.question.length,
+        retrieval: { confidence, entries: entries.slice(0, 3), topK: entries.length },
+        intent,
+        thresholds: {
+          refuseBelowConfidence: config.assistant.refuseBelowConfidence,
+          tierBSwapBelowConfidence: config.assistant.tierBSwapBelowConfidence,
+        },
+        verdict: {
+          refuses: confidence < config.assistant.refuseBelowConfidence,
+          weak: confidence >= config.assistant.refuseBelowConfidence && confidence < config.assistant.tierBSwapBelowConfidence,
+          complexity: questionComplexity(req.body.question),
+          primary: choosePrimary(ctx),
+          reason: primaryReason(ctx),
+        },
+      };
+    },
+  );
 
   /** ---- see-all pages: paginated, searchable, filterable reads ---- */
 

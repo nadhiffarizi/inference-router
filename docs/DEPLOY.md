@@ -71,7 +71,10 @@ curl https://router.kreasiodigital.com/v1/health
 - Sessions are long-lived (30d cookie) by demo decision; logs/restarts don't
   log anyone out (sessions live in SQLite).
 - Demo-fallback env (`ROUTING_CHAIN`, `MOCK_FAILURE_*`) belongs in dev only —
-  leave it unset so routing is pure policy.
+  leave it unset so routing is pure policy. Exception: the assessment demo box
+  runs `DEMO_CONTROLS=1` (set in `docker-compose.yml`) so assessors can drive
+  failure scenarios from the console's Demo Lab; the flag gates the whole
+  `/v1/console/demo/*` surface and defaults to off.
 
 ---
 
