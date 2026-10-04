@@ -1,4 +1,5 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { db } from "../db/index.js";
 import { apiKeys, chatSessions, requests, routingDecisions, tenants } from "../db/schema.js";
@@ -558,53 +559,153 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     return { rows, total, limit, offset, facets: { tenants: names } };
   });
 
-  /** Chart source: per-bucket metering rolled up per tenant, no new deps in
-      the console — the surface draws the bars. Bucketing on the ISO prefix of
-      created_at (hour for 24h, day for 30d) mirrors the quota's utc_day scan. */
+  /** Chart source for /observability and the see-all pages: one endpoint per
+      the same domain the pages list, so a page's chart reflects its filters
+      (same query params as the matching list endpoint, minus paging).
+      Time domains bucket on the ISO prefix of created_at (hour for 24h, day
+      for 30d) — the same scan the quota's utc_day does. The keys domain is
+      categorical: buckets are the top key names by metric, not time. */
   app.get("/v1/console/observability/series", { onRequest: consoleRoute }, async (req) => {
     adminOnly(req);
     const p = req.query as Record<string, string | undefined>;
-    const metric = p.metric === "tokens" || p.metric === "costUsd" ? p.metric : "requests";
+    const metric = p.metric?.trim() || "requests";
+    const domain = p.domain?.trim() || "turns";
     const window = p.window === "30d" ? "30d" : "24h";
+    const tenant = p.tenant?.trim() || undefined;
+
+    const { ids, names } = await tenantIdFilter(tenant);
+    const tenantIn = (col: AnySQLiteColumn) => inArray(col, ids.length ? ids : [-1]);
+
+    if (domain === "keys") {
+      // spend/requests per key name (today), stacked per tenant
+      const conditions = [
+        tenantIn(requests.tenantId),
+        sql`substr(${requests.createdAt}, 1, 10) = ${utcDay()}`,
+      ];
+      if (p.q?.trim()) conditions.push(like(requests.keyLabel, `%${p.q.trim().slice(0, 120)}%`));
+      const value =
+        metric === "costUsd"
+          ? sql<number>`coalesce(sum(${requests.estimatedCostUsd}), 0)`
+          : sql<number>`count(*)`;
+      const spend = sql<number>`coalesce(sum(${requests.estimatedCostUsd}), 0)`;
+      const rows = await db
+        .select({ bucket: requests.keyLabel, tenant: tenants.name, value })
+        .from(requests)
+        .innerJoin(tenants, eq(tenants.id, requests.tenantId))
+        .where(and(...conditions))
+        .groupBy(requests.tenantId, requests.keyLabel)
+        .then((r) => r.map((row) => ({ ...row, value: Number(row.value) })));
+      // top keys by metric, so the chart stays readable however many keys exist
+      const ranked = [...new Set(rows.map((r) => r.bucket ?? "unknown"))]
+        .map((label) => ({ label, total: rows.filter((r) => (r.bucket ?? "unknown") === label).reduce((s, r) => s + r.value, 0) }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 10)
+        .map((k) => k.label);
+      const buckets = ranked;
+      const series = new Map<string, number[]>();
+      for (const name of names) series.set(name, new Array(buckets.length).fill(0));
+      for (const r of rows) {
+        const label = r.bucket ?? "unknown";
+        const i = buckets.indexOf(label);
+        const values = series.get(r.tenant);
+        if (values && i >= 0) values[i] = r.value;
+      }
+      return pack({ domain, metric, bucketKind: "category", buckets,
+        series: Array.from(series, ([tenantName, values]) => ({ tenant: tenantName, values })).sort((a, b) => a.tenant.localeCompare(b.tenant)), total: rows.filter((r) => buckets.includes(r.bucket ?? "unknown")).reduce((s, r) => s + r.value, 0) });
+    }
+
+    // time domains
     const stepMs = window === "30d" ? 86_400_000 : 3_600_000;
     const spanMs = window === "30d" ? 30 * stepMs : 24 * stepMs;
     const bucketLen = window === "30d" ? 10 : 13; // YYYY-MM-DD | YYYY-MM-DDTHH
-
-    const value =
-      metric === "requests"      ? sql<number>`count(*)`
-      : metric === "tokens"      ? sql<number>`coalesce(sum(${requests.promptTokens} + ${requests.completionTokens}), 0)`
-      : sql<number>`coalesce(sum(${requests.estimatedCostUsd}), 0)`;
-
-    const rows = await db
-      .select({ bucket: sql<string>`substr(${requests.createdAt}, 1, ${bucketLen})`, tenant: tenants.name, value })
-      .from(requests)
-      .innerJoin(tenants, eq(tenants.id, requests.tenantId))
-      .where(gte(requests.createdAt, new Date(Date.now() - spanMs).toISOString().slice(0, bucketLen)))
-      .groupBy(sql`substr(${requests.createdAt}, 1, ${bucketLen})`, tenants.id)
-      .then((r) => r.map((row) => ({ ...row, value: Number(row.value) })));
-
-    // Zero-filled buckets ending at "now", so gaps read as flat ground, not
-    // missing data — and every tenant has a full-length array to stack.
     const buckets: string[] = [];
     const now = Date.now();
     for (let t = now - spanMs + stepMs; t <= now; t += stepMs) {
       buckets.push(new Date(t).toISOString().slice(0, bucketLen));
     }
-    const allTenants = await db.select({ name: tenants.name }).from(tenants).orderBy(tenants.name);
-    const series = new Map<string, number[]>(allTenants.map((t) => [t.name, new Array(buckets.length).fill(0)]));
-    for (const r of rows) {
-      const values = series.get(r.tenant);
-      const i = buckets.indexOf(r.bucket);
-      if (values && i >= 0) values[i] = r.value;
+    const from = buckets[0]!;
+
+    if (domain === "sessions") {
+      const conditions = [tenantIn(chatSessions.tenantId), gte(chatSessions.createdAt, from)];
+      if (p.state === "active") conditions.push(isNull(chatSessions.deletedAt));
+      if (p.state === "deleted") conditions.push(isNotNull(chatSessions.deletedAt));
+      if (p.q?.trim()) {
+        const q = p.q.trim().slice(0, 120);
+        conditions.push(or(like(chatSessions.title, `%${q}%`), like(chatSessions.externalId, `%${q}%`))!);
+      }
+      const rows = await db
+        .select({ bucket: sql<string>`substr(${chatSessions.createdAt}, 1, ${bucketLen})`, tenant: tenants.name, value: sql<number>`count(*)` })
+        .from(chatSessions)
+        .innerJoin(tenants, eq(tenants.id, chatSessions.tenantId))
+        .where(and(...conditions))
+        .groupBy(sql`substr(${chatSessions.createdAt}, 1, ${bucketLen})`, tenants.id)
+        .then((r) => r.map((row) => ({ ...row, value: Number(row.value) })));
+      return pack({ domain, metric: "sessions", bucketKind: "time", buckets, series: fill(rows, names, buckets), total: rows.reduce((s, r) => s + r.value, 0) });
     }
 
-    return {
-      window,
-      metric,
-      buckets,
-      series: Array.from(series, ([tenant, values]) => ({ tenant, values })).sort((a, b) => a.tenant.localeCompare(b.tenant)),
-      total: rows.reduce((s, r) => s + r.value, 0),
-    };
+    if (domain === "decisions") {
+      const conditions = [tenantIn(routingDecisions.tenantId), gte(routingDecisions.createdAt, from)];
+      if (p.capability?.trim()) conditions.push(eq(routingDecisions.capability, p.capability.trim()));
+      if (p.fallback === "fired") conditions.push(eq(routingDecisions.fallbackTriggered, true));
+      if (p.fallback === "quiet") conditions.push(eq(routingDecisions.fallbackTriggered, false));
+      if (p.q?.trim()) {
+        const q = p.q.trim().slice(0, 120);
+        conditions.push(or(like(routingDecisions.requestId, `%${q}%`), like(routingDecisions.chosenBackendId, `%${q}%`))!);
+      }
+      const value =
+        metric === "fallbacks"
+          ? sql<number>`sum(case when ${routingDecisions.fallbackTriggered} then 1 else 0 end)`
+          : sql<number>`count(*)`;
+      const rows = await db
+        .select({ bucket: sql<string>`substr(${routingDecisions.createdAt}, 1, ${bucketLen})`, tenant: tenants.name, value })
+        .from(routingDecisions)
+        .innerJoin(tenants, eq(tenants.id, routingDecisions.tenantId))
+        .where(and(...conditions))
+        .groupBy(sql`substr(${routingDecisions.createdAt}, 1, ${bucketLen})`, tenants.id)
+        .then((r) => r.map((row) => ({ ...row, value: Number(row.value) })));
+      return pack({ domain, metric: metric === "fallbacks" ? "fallbacks" : "requests", bucketKind: "time", buckets, series: fill(rows, names, buckets), total: rows.reduce((s, r) => s + r.value, 0) });
+    }
+
+    // turns (the activity domain — also the home chart)
+    const conditions = [tenantIn(requests.tenantId), gte(requests.createdAt, from)];
+    if (p.outcome?.trim()) conditions.push(eq(requests.outcome, p.outcome.trim()));
+    if (p.capability?.trim()) conditions.push(eq(requests.capability, p.capability.trim()));
+    if (p.q?.trim()) {
+      const q = p.q.trim().slice(0, 120);
+      conditions.push(
+        or(like(requests.question, `%${q}%`), like(requests.id, `%${q}%`), like(requests.modelId, `%${q}%`), like(requests.keyLabel, `%${q}%`))!,
+      );
+    }
+    const value =
+      metric === "tokens"      ? sql<number>`coalesce(sum(${requests.promptTokens} + ${requests.completionTokens}), 0)`
+      : metric === "costUsd"   ? sql<number>`coalesce(sum(${requests.estimatedCostUsd}), 0)`
+      : sql<number>`count(*)`;
+    const rows = await db
+      .select({ bucket: sql<string>`substr(${requests.createdAt}, 1, ${bucketLen})`, tenant: tenants.name, value })
+      .from(requests)
+      .innerJoin(tenants, eq(tenants.id, requests.tenantId))
+      .where(and(...conditions))
+      .groupBy(sql`substr(${requests.createdAt}, 1, ${bucketLen})`, tenants.id)
+      .then((r) => r.map((row) => ({ ...row, value: Number(row.value) })));
+    return pack({ domain: "turns", metric, bucketKind: "time", buckets, series: fill(rows, names, buckets), total: rows.reduce((s, r) => s + r.value, 0) });
+
+    /** zero-fill bucket ground so gaps read as flat, and every tenant gets a
+        full-length array to stack — same as rows arrive grouped by bucket */
+    function fill(rows: { bucket: string; tenant: string; value: number }[], tenantNames: string[], ks: string[]) {
+      const out = new Map<string, number[]>(tenantNames.map((t) => [t, new Array(ks.length).fill(0)]));
+      for (const r of rows) {
+        const values = out.get(r.tenant);
+        const i = ks.indexOf(r.bucket);
+        if (values && i >= 0) values[i] = r.value;
+      }
+      return Array.from(out, ([tenantName, values]) => ({ tenant: tenantName, values })).sort((a, b) => a.tenant.localeCompare(b.tenant));
+    }
+    function pack(x: {
+      domain: string; metric: string; bucketKind: "time" | "category";
+      buckets: string[]; series: { tenant: string; values: number[] }[]; total: number;
+    }) {
+      return { ...x, window: domain === "keys" ? undefined : window };
+    }
   });
 }
 

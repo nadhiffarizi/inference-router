@@ -7,8 +7,9 @@ import {
 import {
   FilterSelect, LogShell, Pager, SearchBox, useApiList, useDebounced, type Paged,
 } from "./components/log-explorer";
-import { SessionDialog } from "./components/session-dialog";
-import { TraceDialog, type TracePayload } from "./components/trace-dialog";
+import { TraceSheet, SessionSheet } from "./components/trace-drawers";
+import type { TracePayload } from "./components/trace-dialog";
+import { LogChart } from "./components/usage-chart";
 import { RouteChain } from "./components/route-chain";
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
@@ -93,7 +94,16 @@ export function ActivityLogPage(): React.ReactElement {
   const { data, error, loading } = useApiList<Paged<ActivityRow>>(url);
 
   return (
-    <LogShell title="Activity — every gateway call" sub="searchable, paginated; a row opens the chat-turn trace">
+    <LogShell title="Activity — every gateway call" sub="searchable, paginated; a row opens the chat-turn trace in a side drawer">
+      <LogChart
+        domain="turns"
+        metrics={[
+          { key: "requests", label: "requests" },
+          { key: "tokens", label: "tokens" },
+          { key: "costUsd", label: "cost" },
+        ]}
+        filters={{ q, tenant, outcome, capability }}
+      />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={qInput} onChange={setQInput} placeholder="question, request id, model, key…" />
@@ -169,7 +179,7 @@ export function ActivityLogPage(): React.ReactElement {
         </>
       )}
 
-      <TraceDialog trace={openTrace} onClose={() => setOpenTrace(null)} />
+      <TraceSheet trace={openTrace} onClose={() => setOpenTrace(null)} />
     </LogShell>
   );
 }
@@ -188,7 +198,13 @@ export function SessionsLogPage(): React.ReactElement {
   const { data, error, loading } = useApiList<Paged<SessionRow>>(url);
 
   return (
-    <LogShell title="Chat sessions — every tenant" sub="soft-deleted included; a row opens the session timeline">
+    <LogShell title="Chat sessions — every tenant" sub="soft-deleted included; a row opens the session timeline in a side drawer">
+      <LogChart
+        domain="sessions"
+        metrics={[{ key: "sessions", label: "created" }]}
+        filters={{ q, tenant, state }}
+        note="sessions created, by creation time"
+      />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={qInput} onChange={setQInput} placeholder="first question or session_id…" />
@@ -254,7 +270,7 @@ export function SessionsLogPage(): React.ReactElement {
         </>
       )}
 
-      <SessionDialog uid={openUid} onClose={() => setOpenUid(null)} />
+      <SessionSheet uid={openUid} onClose={() => setOpenUid(null)} />
     </LogShell>
   );
 }
@@ -274,6 +290,14 @@ export function DecisionsLogPage(): React.ReactElement {
 
   return (
     <LogShell title="Routing decisions — every tenant" sub="the full ordered plan recorded per request, paginated">
+      <LogChart
+        domain="decisions"
+        metrics={[
+          { key: "requests", label: "decisions" },
+          { key: "fallbacks", label: "fallbacks" },
+        ]}
+        filters={{ q, tenant, capability, fallback }}
+      />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={qInput} onChange={setQInput} placeholder="request id or chosen backend…" />
@@ -362,6 +386,15 @@ export function KeysLogPage(): React.ReactElement {
 
   return (
     <LogShell title="Per key — today, every tenant" sub="metered by key name; keys issued and deleted both appear while they metered anything">
+      <LogChart
+        domain="keys"
+        metrics={[
+          { key: "costUsd", label: "cost" },
+          { key: "requests", label: "requests" },
+        ]}
+        filters={{ q, tenant }}
+        note="top keys by spend today, stacked per tenant"
+      />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={qInput} onChange={setQInput} placeholder="key name…" />

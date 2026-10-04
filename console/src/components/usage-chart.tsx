@@ -1,44 +1,96 @@
 import { useState } from "react";
-import { useApiList, type SeriesData } from "./log-explorer";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
+import {
+  ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig,
+} from "./ui/chart";
 import { cn, usd } from "../lib/utils";
+import { useApiList, type SeriesData } from "./log-explorer";
 
 /**
- * Usage over time (Langfuse-style tracking chart): STACKED BARS, one segment
- * per tenant, one bar per time bucket. Bars suit this data — the values are
- * discrete metering counts/spend per bucket, they stack into a comparable
- * total, and gaps read as "no traffic" (a line would fake a trend between
- * unconnected buckets). Hover a segment for its exact value.
+ * Usage charts, on shadcn's chart wrapper (recharts underneath — the one chart
+ * system on the console). Bars again: the buckets are discrete metering sums,
+ * they stack into a comparable total, and traffic gaps should read as gaps.
+ *
+ * One chart body, two surfaces: <UsageChart> on /observability (turns, with
+ * metric + window toggles) and <LogChart> at the top of each see-all page —
+ * fed that page's domain AND its current filters, so the picture and the table
+ * always agree.
  */
 
-const METRICS: { key: string; label: string }[] = [
-  { key: "requests", label: "requests" },
-  { key: "tokens", label: "tokens" },
-  { key: "costUsd", label: "cost" },
+/** Muted hues, matched to the badge accents; assigned per series in config order. */
+const PALETTE = [
+  "oklch(0.765 0.177 163.223)", // emerald-400
+  "oklch(0.707 0.165 254.624)", // blue-400
+  "oklch(0.702 0.183 293.541)", // violet-400
+  "oklch(0.828 0.189 84.429)", // amber-400
+  "oklch(0.712 0.194 13.428)", // rose-400
+  "oklch(0.777 0.152 181.912)", // teal-400
 ];
 
-const WINDOWS: { key: string; label: string }[] = [
-  { key: "24h", label: "24h hourly" },
-  { key: "30d", label: "30 days daily" },
-];
+const METRIC_LABELS: Record<string, string> = {
+  requests: "requests",
+  tokens: "tokens",
+  costUsd: "cost",
+  fallbacks: "fallbacks fired",
+  sessions: "sessions created",
+};
 
-/** Muted set, matched to the badge accents — tenants are the only hue-coded
-    series on the page, and the legend carries the mapping. */
-const SEGMENT_COLORS = [
-  "var(--color-emerald-400, oklch(0.765 0.177 163.223))",
-  "var(--color-blue-400, oklch(0.707 0.165 254.624))",
-  "var(--color-violet-400, oklch(0.702 0.183 293.541))",
-  "var(--color-amber-400, oklch(0.828 0.189 84.429))",
-  "var(--color-rose-400, oklch(0.712 0.194 13.428))",
-  "var(--color-teal-400, oklch(0.777 0.152 181.912))",
-];
+type SeriesResponse = SeriesData;
+
+/** The stacked-bar body shared by every chart on the observability surface. */
+function StackedBars({ data, className }: { data: SeriesData; className?: string }): React.ReactElement {
+  const config: ChartConfig = Object.fromEntries(
+    data.series.map((t, i) => [t.tenant, { label: t.tenant, color: PALETTE[i % PALETTE.length] }]),
+  );
+  // one row per bucket; a column per tenant, for recharts to stack
+  const rows = data.buckets.map((b, i) => {
+    const row: Record<string, string | number> = { bucket: bucketLabel(b, data.bucketKind ?? "time") };
+    for (const t of data.series) row[t.tenant] = t.values[i] ?? 0;
+    return row;
+  });
+  const fmtY = metricFormat(data.metric);
+
+  return (
+    <ChartContainer config={config} className={cn("aspect-auto h-[220px] w-full", className)}>
+      <BarChart data={rows} margin={{ left: 4, right: 8 }}>
+        <CartesianGrid vertical={false} />
+        <XAxis
+          dataKey="bucket"
+          tickLine={false}
+          axisLine={false}
+          tickMargin={8}
+          minTickGap={24}
+          tickFormatter={(v: string) => (data.bucketKind === "category" ? v.slice(0, 14) : v)}
+        />
+        <YAxis tickLine={false} axisLine={false} width={48} tickFormatter={fmtY} />
+        <ChartTooltip
+          content={<ChartTooltipContent labelFormatter={(label) => String(label)} />}
+          cursor={{ fill: "var(--muted)", fillOpacity: 0.35 }}
+        />
+        <ChartLegend content={<ChartLegendContent />} />
+        {/* stackId="s" makes the tenants one bar per bucket; the rounded crown
+            goes on the top series of the stack */}
+        {data.series.map((t, i) => (
+          <Bar
+            key={t.tenant}
+            dataKey={t.tenant}
+            stackId="s"
+            fill={`var(--color-${t.tenant})`}
+            radius={i === data.series.length - 1 ? [3, 3, 0, 0] : 0}
+          />
+        ))}
+      </BarChart>
+    </ChartContainer>
+  );
+}
 
 export function UsageChart(): React.ReactElement {
   const [metric, setMetric] = useState("requests");
   const [span, setSpan] = useState("24h");
-  const { data, error, loading } = useApiList<SeriesData>(
-        `/v1/console/observability/series?metric=${metric}&window=${span}`,
+  const { data, error, loading } = useApiList<SeriesResponse>(
+    `/v1/console/observability/series?domain=turns&metric=${metric}&window=${span}`,
   );
 
   return (
@@ -47,30 +99,81 @@ export function UsageChart(): React.ReactElement {
         <div>
           <p className="text-sm font-semibold">usage over time</p>
           <p className="text-xs text-muted-foreground">
-            {metric === "costUsd" ? "metered spend, stacked per tenant" : "stacked per tenant · utc"}
+            {METRIC_LABELS[metric] ?? metric} · stacked per tenant · utc
+            {data ? ` · ${chartTotal(data)} over the window` : ""}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {METRICS.map((m) => (
-            <Toggle key={m.key} active={metric === m.key} onClick={() => setMetric(m.key)}>{m.label}</Toggle>
+          {["requests", "tokens", "costUsd"].map((m) => (
+            <Toggle key={m} active={metric === m} onClick={() => setMetric(m)}>{METRIC_LABELS[m]!}</Toggle>
           ))}
           <span className="mx-1 text-border">|</span>
-          {WINDOWS.map((w) => (
-            <Toggle key={w.key} active={span === w.key} onClick={() => setSpan(w.key)}>{w.label}</Toggle>
-          ))}
+          <Toggle active={span === "24h"} onClick={() => setSpan("24h")}>24h hourly</Toggle>
+          <Toggle active={span === "30d"} onClick={() => setSpan("30d")}>30 days daily</Toggle>
         </div>
       </div>
 
-      {error ? (
-        <p className="text-sm text-destructive">{error}</p>
-      ) : loading ? (
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full"><BarSkeleton /></svg>
-      ) : data ? (
-        <SeriesSvg data={data} />
-      ) : null}
+      <ChartState error={error} loading={loading} data={data} />
     </Card>
   );
 }
+
+/** A page's chart: that domain's meters over time (or top keys for /keys),
+    shaped by whatever the toolbar above the table is filtering on. */
+export function LogChart({
+  domain,
+  metrics,
+  filters,
+  note,
+}: {
+  domain: "turns" | "sessions" | "decisions" | "keys";
+  metrics: { key: string; label: string }[];
+  filters: Record<string, string | number>;
+  note?: string;
+}): React.ReactElement {
+  const categorical = domain === "keys";
+  const [metric, setMetric] = useState(metrics[0]!.key);
+  const [span, setSpan] = useState("24h");
+
+  const sp = new URLSearchParams({ domain, metric: metric });
+  if (!categorical) sp.set("window", span);
+  for (const [k, v] of Object.entries(filters)) {
+    if (v !== "" && v !== 0) sp.set(k, String(v));
+  }
+  const { data, error, loading } = useApiList<SeriesResponse>(`/v1/console/observability/series?${sp}`);
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold">
+            {METRIC_LABELS[metric] ?? metric} {categorical ? "by key (today)" : "over time"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {note ?? "follows the filters above the table"}
+            {data ? ` · ${chartTotal(data)}${categorical ? "" : " over the window"}` : ""}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {metrics.map((m) => (
+            <Toggle key={m.key} active={metric === m.key} onClick={() => setMetric(m.key)}>{m.label}</Toggle>
+          ))}
+          {!categorical && (
+            <>
+              <span className="mx-1 text-border">|</span>
+              <Toggle active={span === "24h"} onClick={() => setSpan("24h")}>24h hourly</Toggle>
+              <Toggle active={span === "30d"} onClick={() => setSpan("30d")}>30 days daily</Toggle>
+            </>
+          )}
+        </div>
+      </div>
+
+      <ChartState error={error} loading={loading} data={data} />
+    </Card>
+  );
+}
+
+/** Shared toggles / states / formatters */
 
 function Toggle({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }): React.ReactElement {
   return (
@@ -85,110 +188,33 @@ function Toggle({ active, onClick, children }: { active: boolean; onClick: () =>
   );
 }
 
-const W = 720;
-const H = 200;
-const PAD = { top: 8, right: 8, bottom: 20, left: 46 };
-
-function SeriesSvg({ data }: { data: SeriesData }): React.ReactElement {
-  const totals = data.buckets.map((_, i) => data.series.reduce((s, t) => s + (t.values[i] ?? 0), 0));
-  const max = Math.max(...totals, 0);
-  const plotW = W - PAD.left - PAD.right;
-  const plotH = H - PAD.top - PAD.bottom;
-  const band = data.buckets.length > 0 ? plotW / data.buckets.length : plotW;
-  const barW = Math.min(28, band * 0.68);
-  const y = (v: number) => PAD.top + plotH * (1 - v / (max || 1));
-  const fmt = metricFormat(data.metric);
-  // thin the x labels out so dense buckets still leave room to breathe
-  const every = Math.max(1, Math.ceil(data.buckets.length / 12));
-
-  return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="usage over time">
-        {[0, 0.5, 1].map((f) => {
-          const v = max * f;
-          const yy = y(v);
-          return (
-            <g key={f}>
-              <line x1={PAD.left} x2={W - PAD.right} y1={yy} y2={yy} stroke="currentColor" className="text-border" strokeWidth="1" strokeDasharray={f === 0 ? undefined : "3 4"} />
-              <text x={PAD.left - 6} y={yy + 3.5} textAnchor="end" className="fill-muted-foreground text-[10px] tabular-nums">
-                {fmt(v)}
-              </text>
-            </g>
-          );
-        })}
-
-        {data.buckets.map((b, i) => {
-          let acc = 0;
-          const x = PAD.left + i * band + (band - barW) / 2;
-          // label the first bar + a stride, so the axis annotates the window
-          const showLabel = i % every === 0 || i === data.buckets.length - 1;
-          return (
-            <g key={b}>
-              {data.series.map((t, si) => {
-                const v = t.values[i] ?? 0;
-                if (v === 0) return null;
-                const y1 = y(acc + v);
-                const h = PAD.top + plotH - y1 - (acc === 0 ? 0 : 1);
-                const rect = (
-                  <rect
-                    key={t.tenant}
-                    x={x}
-                    y={y1}
-                    width={barW}
-                    height={Math.max(v > 0 ? 1.5 : 0, h)}
-                    fill={SEGMENT_COLORS[si % SEGMENT_COLORS.length]}
-                    rx={acc + v >= max && acc === 0 ? 2 : 0}
-                  >
-                    <title>{`${bucketTitle(b, data.window)} · ${t.tenant} · ${fmt(v)}`}</title>
-                  </rect>
-                );
-                acc += v;
-                return rect;
-              })}
-              {showLabel && (
-                <text x={x + barW / 2} y={H - 6} textAnchor="middle" className="fill-muted-foreground text-[9px]">
-                  {bucketTitle(b, data.window)}
-                </text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-        {data.series.map((t, si) => (
-          <span key={t.tenant} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="size-2.5 rounded-sm" style={{ background: SEGMENT_COLORS[si % SEGMENT_COLORS.length] }} />
-            {t.tenant}
-          </span>
-        ))}
-        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-          total {fmt(data.total)} over the window
-        </span>
-      </div>
-    </div>
-  );
+function ChartState({ error, loading, data }: { error: string | null; loading: boolean; data: SeriesResponse | null }): React.ReactElement {
+  if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if (loading) return <div className="h-[220px] animate-pulse rounded-lg bg-muted/50" />;
+  if (!data || data.buckets.length === 0) {
+    return <p className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">nothing in this window</p>;
+  }
+  const flat = data.series.every((s) => s.values.every((v) => v === 0));
+  if (flat) {
+    return <p className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">no {METRIC_LABELS[data.metric] ?? data.metric} in this window</p>;
+  }
+  return <StackedBars data={data} />;
 }
 
-/** Flat ground while a bucket row loads — same frame, no misleading values. */
-function BarSkeleton(): React.ReactElement {
-  return (
-    <g className="text-border">
-      <line x1={PAD.left} x2={W - PAD.right} y1={PAD.top + 2} y2={PAD.top + 2} stroke="currentColor" strokeWidth="1" />
-      <line x1={PAD.left} x2={W - PAD.right} y1={H - 20} y2={H - 20} stroke="currentColor" strokeWidth="1" />
-    </g>
-  );
+function chartTotal(data: SeriesData): string {
+  return metricFormat(data.metric)(data.total);
 }
 
 function metricFormat(metric: string): (v: number) => string {
-  if (metric === "costUsd") {
-    return (v) => usd(v);
-  }
-  return (v) => (v >= 10_000 ? `${(v / 1000).toFixed(0)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)));
+  if (metric === "costUsd") return (v) => usd(v);
+  return (v) =>
+    v >= 10_000 ? `${(v / 1000).toFixed(0)}k`
+    : v >= 1000 ? `${(v / 1000).toFixed(1)}k`
+    : String(Math.round(v));
 }
 
-/** Bucket keys sort as text; the display drops the year to keep the axis tight. */
-function bucketTitle(bucket: string, span: string): string {
-  if (span === "24h") return bucket.slice(11, 13) + "h";
-  return bucket.slice(5, 10);
+/** Bucket keys sort as text; the display keeps only what the axis needs. */
+function bucketLabel(bucket: string, kind: "time" | "category"): string {
+  if (kind === "category") return bucket.slice(0, 18);
+  return bucket.length === 13 ? bucket.slice(11, 13) + ":00" : bucket.slice(5, 10);
 }

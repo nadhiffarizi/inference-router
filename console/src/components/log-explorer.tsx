@@ -21,18 +21,14 @@ export type Paged<T> = {
 };
 
 export type SeriesData = {
-  window: "24h" | "30d";
+  domain: string;
   metric: string;
+  bucketKind: "time" | "category";
   buckets: string[];
   series: { tenant: string; values: number[] }[];
   total: number;
 };
 
-export async function fetchSeries(metric: string, window: string): Promise<SeriesData> {
-  const res = await fetch(`/v1/console/observability/series?metric=${metric}&window=${window}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()) as SeriesData;
-}
 
 /** GET of a paginated list; refetches whenever the caller changes the URL. */
 export function useApiList<T>(url: string): { data: T | null; error: string | null; loading: boolean } {
