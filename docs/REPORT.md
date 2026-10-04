@@ -11,7 +11,7 @@ building — each growth stated with its reason (D11–D15).
 |---|---|
 | **GitHub repository** (source + all documentation) | <https://github.com/nadhiffarizi/inference-router> — docs live in [`docs/`](.): this report, [`DECISIONS.md`](DECISIONS.md) (decisions argued before code), [`RULES.md`](RULES.md) (routing rationale), [`FLOW.md`](FLOW.md) (request path + failure shapes), [`EVALUATION.md`](EVALUATION.md) (measured A/B), [`DEPLOY.md`](DEPLOY.md) (runbook), [`demo.postman_collection.json`](demo.postman_collection.json) (the case set of sections 8 and 10, importable) |
 | **Deployed URL** | <https://router.kreasiodigital.com> — health: [`/v1/health`](https://router.kreasiodigital.com/v1/health) (`{"status":"ok"}`); self-hosted: Docker + NGINX + Cloudflare TLS per [`DEPLOY.md`](DEPLOY.md) |
-| **Console credentials** | The login page lists the account emails only (no passwords shown in the app). Passwords, documented here only: `team@demo.local` / `mekari-demo-2026` (product team view) · `admin@demo.local` / `mekari-demo-2026` (adds cross-tenant Observability) · `demo@example.local` / `mekari-demo-2026` (product view on the `quota-zero` tenant — its Playground 429s on the first message) |
+| **Console credentials** | The login page lists the account emails only (no passwords shown in the app). Passwords, documented here only: `team@demo.local` / `mekari-demo-2026` (product team view) · `admin@demo.local` / `mekari-demo-2026` (adds cross-tenant Observability) · `zero@demo.local` / `mekari-demo-2026` (product view on the `quota-zero` tenant — its Playground 429s on the first message) |
 
 Companion documents (this report cites each inline; the map is here so the
 set is obvious at a glance):
@@ -394,7 +394,7 @@ curl -s "$BASE/v1/support-assistant" -X POST \
   -H "Authorization: Bearer $ZERO" -H "$CT" -d '{"message":"hi"}'
 #   HTTP 429 quota_exceeded on the very first call (used+1 > 0) — the same
 #   fail-closed behaviour B5 walks up to, with no sequence needed. Console
-#   demo: log in as demo@example.local, connect the Playground with the ZERO
+#   demo: log in as zero@demo.local, connect the Playground with the ZERO
 #   key, send one message → quota_exceeded in the chat bubble and the X-ray.
 
 ## B6 — auth fails closed: unknown key, and no header at all (same shape)

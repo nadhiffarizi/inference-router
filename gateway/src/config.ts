@@ -160,11 +160,11 @@ export const config = {
     }),
 
   /** Console accounts: "email:password:role:tenantName". Shared demo creds are fine.
-   *  demo@example.local sits on quota-zero (0 requests/day) — its Playground
+   *  zero@demo.local sits on quota-zero (0 requests/day) — its Playground
    *  shows the 429 on the first message, no sequence needed. */
   seedUsers: (process.env.SEED_USERS?.trim() ||
     "admin@demo.local:mekari-demo-2026:admin:ops, team@demo.local:mekari-demo-2026:product:demo, " +
-    "demo@example.local:mekari-demo-2026:product:quota-zero")
+    "zero@demo.local:mekari-demo-2026:product:quota-zero")
     .split(",")
     .map((entry) => {
       const [email, password, role, tenantName] = entry.split(":");
