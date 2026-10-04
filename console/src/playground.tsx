@@ -197,6 +197,7 @@ function SessionChat({
   async function send(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     if (!input.trim() || busy) return;
+    setInput(""); // clear immediately — the message lives in the stream now
     setBusy(true);
     setFault(null);
     setMeta(null);
@@ -279,8 +280,8 @@ function SessionChat({
         </div>
       </aside>
 
-      {/* middle: chat pane on top, X-ray below it from lg (right column from xl) */}
-      <section className="flex min-w-0 flex-col lg:h-full lg:min-h-0 lg:pl-5 xl:pr-5">
+      {/* middle: chat pane on top, X-ray below it from lg (right column from 2xl) */}
+      <section className="flex min-w-0 flex-1 flex-col lg:h-full lg:min-h-0 lg:pl-5 2xl:pr-5">
         {/* transcript: anchored to the bottom while short, grows + scrolls once long.
             anchor via the sentinel's mt-auto, NOT justify-end — justify-end in a
             scroll container makes the top rows unreachable once content overflows */}
@@ -363,7 +364,10 @@ function SessionChat({
                   placeholder="Ask a support question…"
                   rows={3}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send(e);
+                    // Enter sends, Shift+Enter (and IME composition) inserts a newline
+                    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+                    e.preventDefault();
+                    void send(e);
                   }}
                 />
                 <div className="mt-3 flex items-center justify-between gap-2">
@@ -406,14 +410,14 @@ function SessionChat({
           </Card>
         </div>
 
-        {/* X-ray under the chat on lg, with a rule between it and the chat */}
-        <div className="hidden min-w-0 flex-col gap-4 lg:flex xl:hidden lg:mt-5 lg:h-72 lg:shrink-0 lg:overflow-y-auto lg:border-t lg:border-border lg:pt-5">
+        {/* X-ray under the chat on lg–2xl, sized to its content (no blank tail) */}
+        <div className="hidden min-w-0 flex-col gap-4 lg:flex 2xl:hidden lg:mt-5 lg:max-h-[45svh] lg:shrink-0 lg:overflow-y-auto lg:border-t lg:border-border lg:pt-5">
           <Xray meta={meta} final={final} fault={fault} capability={capability} />
         </div>
       </section>
 
-      {/* X-ray as its own right column on xl, divider on its left */}
-      <aside className="hidden min-w-0 shrink-0 flex-col gap-4 overflow-y-auto xl:flex xl:h-full xl:w-[360px] xl:border-l xl:border-border xl:pl-5">
+      {/* X-ray as its own right column on 2xl, divider on its left */}
+      <aside className="hidden min-w-0 shrink-0 flex-col gap-4 overflow-y-auto 2xl:flex 2xl:h-full 2xl:w-[340px] 2xl:border-l 2xl:border-border 2xl:pl-5">
         <Xray meta={meta} final={final} fault={fault} capability={capability} />
       </aside>
 
@@ -432,77 +436,77 @@ function TwoBubbles({ q, a, error, refused, live }: { q: string; a: string | nul
 }
 
 export function Xray({ meta, final, fault, capability = "assistant" }: { meta: StreamMeta | null; final: StreamFinal | null; fault: Fault | null; capability?: Capability }): React.ReactElement {
+  // Container-width layout: cards stack in narrow columns, row up in the
+  // wide strip — viewport breakpoints can't express both from one component.
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader><CardTitle>routing</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          {fault && <p className="text-sm text-destructive">{fault.code}</p>}
-          {meta ? (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="info">{meta.backend?.id}</Badge>
-                <span className="font-mono text-xs text-muted-foreground">{meta.backend?.model}</span>
-                {meta.fallbackTriggered ? <Badge variant="warning">fallback fired</Badge> : <Badge variant="secondary">fallback idle</Badge>}
-              </div>
-              <ol className="mt-1 space-y-1.5">
-                {meta.routingPlan?.map((s, i) => (
-                  <li key={i} className="flex items-start gap-2 text-xs">
-                    <Badge variant={outcomeBadge(s.action)}>{s.action}</Badge>
-                    <span className="font-mono">{s.backendId}</span>
-                    <span className="text-muted-foreground">{s.reason}</span>
-                  </li>
-                ))}
-              </ol>
-            </>
-          ) : !fault && <p className="text-sm text-muted-foreground">waiting for first request…</p>}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Card>
-            <CardHeader><CardTitle>retrieval</CardTitle></CardHeader>
-            <CardContent>
-              {meta?.retrieval ? (
-                <div className="space-y-2">
-                  <p className="flex items-baseline gap-1">
-                    <span className="text-2xl font-semibold">{meta.retrieval.confidence.toFixed(2)}</span>
-                    <span className="text-xs text-muted-foreground">confidence</span>
-                  </p>
-                  <ul className="space-y-1.5">
-                    {meta.retrieval.entries.map((e) => (
-                      <li key={e.id} className="truncate text-xs text-muted-foreground">
-                        <Badge variant="outline" className="mr-1.5 text-[10px]">{e.intent}</Badge>
-                        {e.question.slice(0, 48)}
-                      </li>
-                    ))}
-                  </ul>
+    <div className="@container">
+      <div className="grid gap-4 @xl:grid-cols-3">
+        <Card>
+          <CardHeader><CardTitle>routing</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {fault && <p className="text-sm text-destructive">{fault.code}</p>}
+            {meta ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="info">{meta.backend?.id}</Badge>
+                  <span className="font-mono text-xs text-muted-foreground">{meta.backend?.model}</span>
+                  {meta.fallbackTriggered ? <Badge variant="warning">fallback fired</Badge> : <Badge variant="secondary">fallback idle</Badge>}
                 </div>
-              ) : <p className="text-sm text-muted-foreground">waiting…</p>}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>intent</CardTitle></CardHeader>
-            <CardContent>
-              {meta?.intent ? (
-                <div className="space-y-1">
-                  <span className={cn("text-lg font-semibold", !meta.intent.intent && "text-muted-foreground")}>
-                    {meta.intent.intent ?? "none"}
-                  </span>
-                  <p className="text-xs text-muted-foreground">confidence {meta.intent.confidence.toFixed(2)}</p>
-                </div>
-              ) : <p className="text-sm text-muted-foreground">waiting…</p>}
-            </CardContent>
-          </Card>
-        </div>
+                <ol className="mt-1 space-y-1.5">
+                  {meta.routingPlan?.map((s, i) => (
+                    <li key={i} className="flex items-start gap-2 text-xs">
+                      <Badge variant={outcomeBadge(s.action)}>{s.action}</Badge>
+                      <span className="font-mono">{s.backendId}</span>
+                      <span className="text-muted-foreground">{s.reason}</span>
+                    </li>
+                  ))}
+                </ol>
+              </>
+            ) : !fault && <p className="text-sm text-muted-foreground">waiting for first request…</p>}
+          </CardContent>
+        </Card>
 
         <Card>
+          <CardHeader><CardTitle>retrieval</CardTitle></CardHeader>
+          <CardContent>
+            {meta?.retrieval ? (
+              <div className="space-y-2">
+                <p className="flex items-baseline gap-1">
+                  <span className="text-2xl font-semibold">{meta.retrieval.confidence.toFixed(2)}</span>
+                  <span className="text-xs text-muted-foreground">confidence</span>
+                </p>
+                <ul className="space-y-1.5">
+                  {meta.retrieval.entries.map((e) => (
+                    <li key={e.id} className="truncate text-xs text-muted-foreground">
+                      <Badge variant="outline" className="mr-1.5 text-[10px]">{e.intent}</Badge>
+                      {e.question.slice(0, 48)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : <p className="text-sm text-muted-foreground">waiting…</p>}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>intent</CardTitle></CardHeader>
+          <CardContent>
+            {meta?.intent ? (
+              <div className="space-y-1">
+                <span className={cn("text-lg font-semibold", !meta.intent.intent && "text-muted-foreground")}>
+                  {meta.intent.intent ?? "none"}
+                </span>
+                <p className="text-xs text-muted-foreground">confidence {meta.intent.confidence.toFixed(2)}</p>
+              </div>
+            ) : <p className="text-sm text-muted-foreground">waiting…</p>}
+          </CardContent>
+        </Card>
+
+        <Card className="@xl:col-span-3">
           <CardHeader><CardTitle>metering</CardTitle></CardHeader>
           <CardContent>
             {final?.metering ? (
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 gap-3 @xl:grid-cols-4">
                 <Metric label="model" value={final.metering.model.replace(/^google\/|^anthropic\//, "")} />
                 <Metric label="latency" value={`${final.metering.latencyMs} ms`} />
                 <Metric label="tokens" value={`${final.metering.tokens.prompt} + ${final.metering.tokens.completion}`} />

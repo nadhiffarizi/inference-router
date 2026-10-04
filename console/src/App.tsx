@@ -106,12 +106,12 @@ function Gate(): React.ReactElement {
         </Sidebar>
 
         <MainColumn>
-          <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-6">
+          <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur md:px-6">
             <div className="flex min-w-0 items-center gap-3">
               <span className="hidden md:flex"><SidebarTrigger /></span>
               <div className="min-w-0">
                 <h1 className="truncate text-xl font-semibold tracking-tight">{current.title}</h1>
-                <p className="truncate text-xs text-muted-foreground">{current.subtitle}</p>
+                <p className="truncate text-sm text-muted-foreground">{current.subtitle}</p>
               </div>
             </div>
             <Badge variant="outline" className="hidden text-muted-foreground md:inline-flex">

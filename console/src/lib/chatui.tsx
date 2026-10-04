@@ -17,7 +17,8 @@ export function Bubble({
     <div className={role === "user" ? "flex justify-end" : "flex justify-start"}>
       <div
         className={cn(
-          "max-w-[85%] px-3.5 py-2.5 text-sm leading-relaxed",
+          role === "user" ? "max-w-[85%]" : "max-w-[min(92%,75ch)]",
+          "px-3.5 py-2.5 text-sm leading-relaxed",
           role === "user"
             ? "rounded-xl rounded-br-sm bg-primary text-primary-foreground"
             : "rounded-xl rounded-bl-sm border",
