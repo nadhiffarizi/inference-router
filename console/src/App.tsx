@@ -45,14 +45,16 @@ function Gate(): React.ReactElement {
   const path = usePath();
 
   // Role-scoped menu; the active tab is the URL, so refresh/deep links work.
+  // Sub-paths (the observability see-all pages, /observability/<name>) resolve
+  // to their parent tab — the view itself dispatches on the exact path.
   const menus = NAV.filter((n) => n.role === "all" || (me?.user.role === "admin"));
-  const current = menus.find((n) => n.path === path) ?? menus[0]!;
+  const current = menus.find((n) => path === n.path || path.startsWith(`${n.path}/`)) ?? menus[0]!;
   const activeTab = current.id;
 
   // Unknown or role-gated path → snap to the first permitted menu.
   useEffect(() => {
-    if (me && window.location.pathname !== current.path) navigate(current.path, true);
-  }, [me, current.path]);
+    if (me && !path.startsWith(current.path)) navigate(current.path, true);
+  }, [me, current.path, path]);
 
   if (loading) {
     return <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">loading…</div>;

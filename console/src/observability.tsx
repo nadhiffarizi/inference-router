@@ -10,9 +10,13 @@ import {
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
 import { Stat } from "./usage";
-import { fetchSessionTimeline, type Turn } from "./api";
-import { TraceDialog, type TracePayload } from "./components/trace-dialog";
-import { Bubble, Markdown } from "./lib/chatui";
+import { type TracePayload } from "./components/trace-dialog";
+import { TraceDialog } from "./components/trace-dialog";
+import { SessionDialog } from "./components/session-dialog";
+import { UsageChart } from "./components/usage-chart";
+import { SectionHeader } from "./components/log-explorer";
+import { ActivityLogPage, DecisionsLogPage, KeysLogPage, SessionsLogPage } from "./observability-logs";
+import { linkProps, usePath } from "./router";
 
 /**
  * Admin-only cross-tenant view: usage for every tenant plus the routing
@@ -76,6 +80,19 @@ type Observability = {
 };
 
 export function ObservabilityView(): React.ReactElement {
+  // the see-all pages live under /observability/<name> — real URLs, so a
+  // refresh or shared link keeps the same view (the shell matches the prefix)
+  switch (usePath()) {
+    case "/observability/activity": return <ActivityLogPage />;
+    case "/observability/sessions": return <SessionsLogPage />;
+    case "/observability/decisions": return <DecisionsLogPage />;
+    case "/observability/keys": return <KeysLogPage />;
+    default: break;
+  }
+  return <ObservabilityHome />;
+}
+
+function ObservabilityHome(): React.ReactElement {
   const [data, setData] = useState<Observability | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openTrace, setOpenTrace] = useState<TracePayload | null>(null);
@@ -115,6 +132,10 @@ export function ObservabilityView(): React.ReactElement {
         <Stat label="fleet spend today" value={usd(fleetSpend)} sub="all tenants, USD budget enforced" />
         <Stat label="fallback fired (last 25)" value={String(fallbackFires)} sub="routing decisions" />
       </div>
+
+      <section>
+        <UsageChart />
+      </section>
 
       <section>
         <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Tenants</h2>
@@ -161,7 +182,7 @@ export function ObservabilityView(): React.ReactElement {
 
       {data.keys && data.keys.length > 0 && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Per key (today, all tenants)</h2>
+          <SectionHeader title="Per key (today, all tenants)" seeAllHref="/observability/keys" />
           <Card className="overflow-hidden hidden md:block">
             <Table>
               <TableHeader>
@@ -203,7 +224,7 @@ export function ObservabilityView(): React.ReactElement {
 
       {data.activity && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Activity — gateway calls (latest {data.activity.length})</h2>
+          <SectionHeader title={`Activity — gateway calls (latest ${data.activity.length})`} seeAllHref="/observability/activity" />
           <Card className="overflow-hidden hidden md:block">
             <Table>
               <TableHeader>
@@ -265,7 +286,7 @@ export function ObservabilityView(): React.ReactElement {
 
       {data.sessions && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Chat sessions — every tenant, soft-deleted included</h2>
+          <SectionHeader title="Chat sessions — every tenant, soft-deleted included" seeAllHref="/observability/sessions" />
           <Card className="overflow-hidden hidden md:block">
             <Table>
               <TableHeader>
@@ -311,7 +332,7 @@ export function ObservabilityView(): React.ReactElement {
       )}
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Routing decisions (latest 25, all tenants)</h2>
+        <SectionHeader title="Routing decisions (latest 25, all tenants)" seeAllHref="/observability/decisions" />
         <Card className="overflow-hidden">
           <Table>
             <TableHeader>
@@ -367,59 +388,3 @@ export function ObservabilityView(): React.ReactElement {
     </div>
   );
 }
-
-/** Session timeline (Langfuse session view): turns in order, full trace on each. */
-function SessionDialog({ uid, onClose }: { uid: number | null; onClose: () => void }): React.ReactElement {
-  const [timeline, setTimeline] = useState<{ title: string; turns: Turn[] } | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    setTimeline(null);
-    if (uid === null) return;
-    fetchSessionTimeline(uid, true).then((t) => {
-      if (!alive || !t) return;
-      setTimeline({ title: t.session.title, turns: t.turns });
-    });
-    return () => {
-      alive = false;
-    };
-  }, [uid]);
-
-  return (
-    <Dialog open={uid !== null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{timeline ? timeline.title : "session"}</DialogTitle>
-        </DialogHeader>
-        {timeline === null ? (
-          <p className="text-sm text-muted-foreground">loading…</p>
-        ) : (
-          <div className="max-h-[70vh] space-y-3 overflow-y-auto">
-            {timeline.turns.map((t) => (
-              <div key={t.id} className="rounded-lg border p-3">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-[10px] text-muted-foreground">{t.createdAt.slice(11, 19)} UTC</span>
-                  <Badge variant={outcomeBadge(t.outcome)}>{t.outcome}</Badge>
-                  {t.intent && <Badge variant="success">{t.intent}</Badge>}
-                  <Badge variant="outline" className="font-mono text-[10px]">{t.backendId} · {t.modelId.split("/").pop()}</Badge>
-                  <Badge variant="secondary" className="text-[10px]">{t.keyLabel ?? "—"}</Badge>
-                  <span className="ml-auto text-[10px] text-muted-foreground">{usd(t.costUsd)} · {t.latencyMs} ms</span>
-                </div>
-                <div className="space-y-2">
-                  <Bubble role="user">{t.question ?? "(not recorded)"}</Bubble>
-                  {t.answer ? <Bubble role="assistant"><Markdown text={t.answer} /></Bubble> : t.error ? <Bubble role="assistant" tone="error">{t.error}</Bubble> : null}
-                </div>
-                {t.retrieval && t.retrieval.length > 0 && (
-                  <p className="mt-2 truncate text-[10px] text-muted-foreground">
-                    retrieved: {t.retrieval.map((e) => e.intent).join(", ")} · confidence {t.retrievalConfidence?.toFixed(2)}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-

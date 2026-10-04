@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { db } from "../db/index.js";
 import { apiKeys, chatSessions, requests, routingDecisions, tenants } from "../db/schema.js";
@@ -127,6 +127,73 @@ function plainDecision(r: typeof routingDecisions.$inferSelect) {
     chosenBackendId: r.chosenBackendId,
     fallbackTriggered: r.fallbackTriggered,
     createdAt: r.createdAt,
+  };
+}
+
+/** ---- admin log explorer: the see-all pages behind the top-K tables ----
+    Same rows the summary surfaces render (top-K), read here with paging,
+    search and filters so the ops pages can leave the K behind. */
+
+type PageParams = { q: string | undefined; limit: number; offset: number; tenant: string | undefined };
+
+function pageParams(req: FastifyRequest): PageParams {
+  const p = req.query as Record<string, string | undefined>;
+  return {
+    /** LIKE pattern — SQLite LIKE is case-insensitive for ASCII, which is
+        what the seeded ids/labels/questions are made of. */
+    q: (p.q ?? "").trim().slice(0, 120) || undefined,
+    limit: Math.min(200, Math.max(1, Number(p.limit) || 25)),
+    offset: Math.max(0, Number(p.offset) || 0),
+    tenant: p.tenant?.trim() || undefined,
+  };
+}
+
+/** The console surfaces tenant *names*; the tables key on ids. */
+async function tenantIdFilter(tenant?: string): Promise<{ ids: number[]; names: string[] }> {
+  const all = await db.select({ id: tenants.id, name: tenants.name }).from(tenants).orderBy(tenants.id);
+  return {
+    ids: (tenant ? all.filter((t) => t.name === tenant) : all).map((t) => t.id),
+    names: all.map((t) => t.name),
+  };
+}
+
+function adminOnly(req: FastifyRequest): ConsoleUser {
+  const user = reqUser(req);
+  if (user.role !== "admin") throw errors.forbidden("Observability is admin-only.");
+  return user;
+}
+
+type PlanStepJson = { backendId: string; action: string; reason: string };
+
+/** Shared row shape for the activity list — the summary feed's rows plus the
+    routing plan, so a see-all row opens the same trace viewer on its own. */
+function activityRow(
+  r: typeof requests.$inferSelect,
+  decision: { planJson: string | null; fallbackTriggered: boolean | null } | undefined,
+  tenantName: string,
+) {
+  return {
+    id: r.id,
+    createdAt: r.createdAt,
+    tenant: tenantName,
+    capability: r.capability,
+    keyLabel: r.keyLabel,
+    backendId: r.backendId,
+    modelId: r.modelId,
+    tokens: r.promptTokens + r.completionTokens,
+    costUsd: r.estimatedCostUsd,
+    latencyMs: r.latencyMs,
+    outcome: r.outcome,
+    question: r.question,
+    answer: r.answer,
+    retrievalConfidence: r.confidence,
+    retrieval: r.retrievalJson
+      ? (JSON.parse(r.retrievalJson) as { id: number; question: string; answer: string; intent: string }[])
+      : null,
+    intent: r.intent,
+    error: r.error,
+    plan: decision?.planJson ? (JSON.parse(decision.planJson) as PlanStepJson[]) : [],
+    fallbackTriggered: decision?.fallbackTriggered ?? false,
   };
 }
 
@@ -308,6 +375,236 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
   app.get<{ Params: { uid: number } }>("/v1/console/observability/sessions/:uid", { onRequest: consoleRoute }, async (req) => {
     if (reqUser(req).role !== "admin") throw errors.forbidden("Observability is admin-only.");
     return sessionTurns(Number(req.params.uid)); // cross-tenant: role already verified
+  });
+
+  /** ---- see-all pages: paginated, searchable, filterable reads ---- */
+
+  app.get("/v1/console/observability/activity", { onRequest: consoleRoute }, async (req) => {
+    adminOnly(req);
+    const p = req.query as Record<string, string | undefined>;
+    const { q, limit, offset, tenant } = pageParams(req);
+    const outcome = p.outcome?.trim() || undefined;
+    const capability = p.capability?.trim() || undefined;
+    const { ids, names } = await tenantIdFilter(tenant);
+    const conditions = [inArray(requests.tenantId, ids.length ? ids : [-1])];
+    if (q) {
+      conditions.push(
+        or(
+          like(requests.question, `%${q}%`),
+          like(requests.id, `%${q}%`),
+          like(requests.modelId, `%${q}%`),
+          like(requests.keyLabel, `%${q}%`),
+        )!,
+      );
+    }
+    if (outcome) conditions.push(eq(requests.outcome, outcome));
+    if (capability) conditions.push(eq(requests.capability, capability));
+    if (q) {
+      conditions.push(
+        or(
+          like(requests.question, `%${q}%`),
+          like(requests.id, `%${q}%`),
+          like(requests.modelId, `%${q}%`),
+          like(requests.keyLabel, `%${q}%`),
+        )!,
+      );
+    }
+    const where = and(...conditions);
+
+    const total = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(requests)
+      .where(where)
+      .then((r) => r[0]?.n ?? 0);
+
+    const rows = await db
+      .select({
+        r: requests,
+        planJson: routingDecisions.planJson,
+        fallbackTriggered: routingDecisions.fallbackTriggered,
+        tenant: tenants.name,
+      })
+      .from(requests)
+      .innerJoin(tenants, eq(tenants.id, requests.tenantId))
+      .leftJoin(routingDecisions, eq(routingDecisions.requestId, requests.id))
+      .where(where)
+      .orderBy(desc(requests.createdAt))
+      .limit(limit)
+      .offset(offset)
+      .then((rows) => rows.map((row) => activityRow(row.r, row, row.tenant)));
+
+    return {
+      rows, total, limit, offset,
+      facets: { tenants: names, outcomes: ["ok", "failed", "quota_denied", "refused"], capabilities: ["chat", "support-assistant"] },
+    };
+  });
+
+  app.get("/v1/console/observability/sessions", { onRequest: consoleRoute }, async (req) => {
+    adminOnly(req);
+    const p = req.query as Record<string, string | undefined>;
+    const { q, limit, offset, tenant } = pageParams(req);
+    const { ids, names } = await tenantIdFilter(tenant);
+    const state = p.state === "active" || p.state === "deleted" ? p.state : undefined;
+    const conditions = [inArray(chatSessions.tenantId, ids.length ? ids : [-1])];
+    if (q) conditions.push(or(like(chatSessions.title, `%${q}%`), like(chatSessions.externalId, `%${q}%`))!);
+    if (state === "active") conditions.push(isNull(chatSessions.deletedAt));
+    if (state === "deleted") conditions.push(isNotNull(chatSessions.deletedAt));
+    const where = and(...conditions);
+
+    const total = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(chatSessions)
+      .where(where)
+      .then((r) => r[0]?.n ?? 0);
+
+    const rows = await db
+      .select({
+        uid: chatSessions.uid,
+        tenantName: tenants.name,
+        externalId: chatSessions.externalId,
+        title: chatSessions.title,
+        createdAt: chatSessions.createdAt,
+        updatedAt: chatSessions.updatedAt,
+        deletedAt: chatSessions.deletedAt,
+        turns: sql<number>`(SELECT count(*) FROM requests WHERE requests.chat_session_uid = ${chatSessions.uid})`,
+        spendUsd: sql<number>`(SELECT coalesce(sum(estimated_cost_usd), 0) FROM requests WHERE requests.chat_session_uid = ${chatSessions.uid})`,
+      })
+      .from(chatSessions)
+      .innerJoin(tenants, eq(tenants.id, chatSessions.tenantId))
+      .where(where)
+      .orderBy(desc(chatSessions.updatedAt))
+      .limit(limit)
+      .offset(offset);
+
+    return { rows, total, limit, offset, facets: { tenants: names, state: ["active", "deleted"] } };
+  });
+
+  app.get("/v1/console/observability/decisions", { onRequest: consoleRoute }, async (req) => {
+    adminOnly(req);
+    const p = req.query as Record<string, string | undefined>;
+    const { q, limit, offset, tenant } = pageParams(req);
+    const { ids, names } = await tenantIdFilter(tenant);
+    const capability = p.capability?.trim() || undefined;
+    const conditions = [inArray(routingDecisions.tenantId, ids.length ? ids : [-1])];
+    if (q) conditions.push(or(like(routingDecisions.requestId, `%${q}%`), like(routingDecisions.chosenBackendId, `%${q}%`))!);
+    if (capability) conditions.push(eq(routingDecisions.capability, capability));
+    if (p.fallback === "fired") conditions.push(eq(routingDecisions.fallbackTriggered, true));
+    if (p.fallback === "quiet") conditions.push(eq(routingDecisions.fallbackTriggered, false));
+    const where = and(...conditions);
+
+    const total = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(routingDecisions)
+      .where(where)
+      .then((r) => r[0]?.n ?? 0);
+
+    const rows = await db
+      .select({ d: routingDecisions, tenant: tenants.name })
+      .from(routingDecisions)
+      .innerJoin(tenants, eq(tenants.id, routingDecisions.tenantId))
+      .where(where)
+      .orderBy(desc(routingDecisions.id))
+      .limit(limit)
+      .offset(offset)
+      .then((rows) =>
+        rows.map((row) => ({ ...plainDecision(row.d), tenant: row.tenant })),
+      );
+
+    return { rows, total, limit, offset, facets: { tenants: names, fallback: ["fired", "quiet"] } };
+  });
+
+  /** Per-key spend grouped over metering rows (today), paged — the see-all
+      page behind the per-key table. Grouped rows can't be offset in SQL
+      cheaply, so the count walks the same grouping in a subquery. */
+  app.get("/v1/console/observability/keys", { onRequest: consoleRoute }, async (req) => {
+    adminOnly(req);
+    const { q, limit, offset, tenant } = pageParams(req);
+    const { ids, names } = await tenantIdFilter(tenant);
+    const conditions = [
+      inArray(requests.tenantId, ids.length ? ids : [-1]),
+      sql`substr(${requests.createdAt}, 1, 10) = ${utcDay()}`,
+    ];
+    if (q) conditions.push(like(requests.keyLabel, `%${q}%`));
+    const where = and(...conditions);
+
+    const grouped = db
+      .select({ tenantId: requests.tenantId, label: requests.keyLabel })
+      .from(requests)
+      .where(where)
+      .groupBy(requests.tenantId, requests.keyLabel)
+      .as("grouped");
+
+    const total = await db.select({ n: sql<number>`count(*)` }).from(grouped).then((r) => r[0]?.n ?? 0);
+
+    const spend = sql<number>`coalesce(sum(${requests.estimatedCostUsd}), 0)`;
+    const rows = await db
+      .select({
+        tenant: tenants.name,
+        label: requests.keyLabel,
+        requests: sql<number>`count(*)`,
+        tokens: sql<number>`coalesce(sum(${requests.promptTokens} + ${requests.completionTokens}), 0)`,
+        costUsd: spend,
+        maskedKey: apiKeys.maskedKey,
+      })
+      .from(requests)
+      .innerJoin(tenants, eq(tenants.id, requests.tenantId))
+      .leftJoin(apiKeys, and(eq(apiKeys.tenantId, requests.tenantId), eq(apiKeys.label, requests.keyLabel)))
+      .where(where)
+      .groupBy(requests.tenantId, requests.keyLabel)
+      .orderBy(desc(spend))
+      .limit(limit)
+      .offset(offset);
+
+    return { rows, total, limit, offset, facets: { tenants: names } };
+  });
+
+  /** Chart source: per-bucket metering rolled up per tenant, no new deps in
+      the console — the surface draws the bars. Bucketing on the ISO prefix of
+      created_at (hour for 24h, day for 30d) mirrors the quota's utc_day scan. */
+  app.get("/v1/console/observability/series", { onRequest: consoleRoute }, async (req) => {
+    adminOnly(req);
+    const p = req.query as Record<string, string | undefined>;
+    const metric = p.metric === "tokens" || p.metric === "costUsd" ? p.metric : "requests";
+    const window = p.window === "30d" ? "30d" : "24h";
+    const stepMs = window === "30d" ? 86_400_000 : 3_600_000;
+    const spanMs = window === "30d" ? 30 * stepMs : 24 * stepMs;
+    const bucketLen = window === "30d" ? 10 : 13; // YYYY-MM-DD | YYYY-MM-DDTHH
+
+    const value =
+      metric === "requests"      ? sql<number>`count(*)`
+      : metric === "tokens"      ? sql<number>`coalesce(sum(${requests.promptTokens} + ${requests.completionTokens}), 0)`
+      : sql<number>`coalesce(sum(${requests.estimatedCostUsd}), 0)`;
+
+    const rows = await db
+      .select({ bucket: sql<string>`substr(${requests.createdAt}, 1, ${bucketLen})`, tenant: tenants.name, value })
+      .from(requests)
+      .innerJoin(tenants, eq(tenants.id, requests.tenantId))
+      .where(gte(requests.createdAt, new Date(Date.now() - spanMs).toISOString().slice(0, bucketLen)))
+      .groupBy(sql`substr(${requests.createdAt}, 1, ${bucketLen})`, tenants.id)
+      .then((r) => r.map((row) => ({ ...row, value: Number(row.value) })));
+
+    // Zero-filled buckets ending at "now", so gaps read as flat ground, not
+    // missing data — and every tenant has a full-length array to stack.
+    const buckets: string[] = [];
+    const now = Date.now();
+    for (let t = now - spanMs + stepMs; t <= now; t += stepMs) {
+      buckets.push(new Date(t).toISOString().slice(0, bucketLen));
+    }
+    const allTenants = await db.select({ name: tenants.name }).from(tenants).orderBy(tenants.name);
+    const series = new Map<string, number[]>(allTenants.map((t) => [t.name, new Array(buckets.length).fill(0)]));
+    for (const r of rows) {
+      const values = series.get(r.tenant);
+      const i = buckets.indexOf(r.bucket);
+      if (values && i >= 0) values[i] = r.value;
+    }
+
+    return {
+      window,
+      metric,
+      buckets,
+      series: Array.from(series, ([tenant, values]) => ({ tenant, values })).sort((a, b) => a.tenant.localeCompare(b.tenant)),
+      total: rows.reduce((s, r) => s + r.value, 0),
+    };
   });
 }
 
