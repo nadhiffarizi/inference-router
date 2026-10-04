@@ -106,7 +106,7 @@ function Gate(): React.ReactElement {
         </Sidebar>
 
         <MainColumn>
-          <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur md:px-6">
+          <header className="sticky top-0 z-30 flex shrink-0 items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur md:px-6">
             <div className="flex min-w-0 items-center gap-3">
               <span className="hidden md:flex"><SidebarTrigger /></span>
               <div className="min-w-0">
@@ -119,7 +119,14 @@ function Gate(): React.ReactElement {
             </Badge>
           </header>
 
-          <main className="px-4 pb-24 md:px-8 md:pb-10">
+          {/* main owns vertical scrolling: the playground runs full-bleed in a
+              fixed-height container (its panels scroll internally), the other
+              tabs scroll here — either way the window itself never scrolls */}
+          <main className={cn(
+            activeTab === "playground"
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-[4.5rem] md:px-8 md:pb-0"
+              : "min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-24 md:px-8 md:pb-10",
+          )}>
             {activeTab === "playground" && <Playground />}
             {activeTab === "keys" && <ApiKeysView />}
             {activeTab === "usage" && <UsageView />}
@@ -164,11 +171,13 @@ function BrandText(): React.ReactElement | null {
   );
 }
 
-/** Content column whose left padding follows the collapsible rail width. */
+/** Content column whose left padding follows the collapsible rail width.
+    Pinned to the viewport so pages can size to it (the playground's resizable
+    panels need an exact height to fill minus the header). */
 function MainColumn({ children }: { children: React.ReactNode }): React.ReactElement {
   const { collapsed } = useSidebar();
   return (
-    <div className={cn("min-h-svh transition-[padding] duration-200 ease-in-out md:pl-60", collapsed && "md:pl-14")}>
+    <div className={cn("flex h-svh min-h-svh flex-col transition-[padding] duration-200 ease-in-out md:pl-60", collapsed && "md:pl-14")}>
       {children}
     </div>
   );

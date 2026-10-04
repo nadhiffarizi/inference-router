@@ -6,15 +6,17 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input, Textarea } from "./components/ui/input";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import { cn, usd } from "./lib/utils";
 import { outcomeBadge } from "./lib/badges";
 import { Bubble, Markdown } from "./lib/chatui";
 import { TraceDialog, type TracePayload } from "./components/trace-dialog";
 
 /**
- * Playground: session rail (Langfuse-style grouping) + chat pane + X-ray.
- * Gated on an issued API key (the product-team integration flow). Sessions
- * are grouping only — the assistant stays single-turn by design.
+ * Playground: three resizable panels — session rail (Langfuse-style grouping),
+ * chat pane, inspector/X-ray — chat-only below lg. Gated on an issued API key
+ * (the product-team integration flow). Sessions are grouping only — the
+ * assistant stays single-turn by design.
  */
 
 const KEY_STORAGE = "playground.key";
@@ -123,21 +125,25 @@ type Exchange =
  * request row) so re-entering a session replays its last turn's X-ray
  * instead of resetting to "waiting…". Not everything survives: intent
  * confidence isn't persisted, and quota is a live daily snapshot — those stay
- * unknown/null on restore.
+ * unknown/null on restore. Refused turns (policy gate, unusable output) keep
+ * their refusal so the X-ray explains itself instead of re-displaying intent
+ * for a question the gateway never answered.
  */
-type RestoredXray = { meta: StreamMeta | null; final: StreamFinal | null; fault: Fault | null };
+type RestoredXray = { meta: StreamMeta | null; final: StreamFinal | null; fault: Fault | null; refused: boolean };
 
 function restoredXray(t: Turn): RestoredXray {
+  const refused = t.outcome === "refused";
   return {
+    refused,
     meta: {
       requestId: t.id,
       backend: { id: t.backendId, label: t.backendId, model: t.modelId },
       fallbackTriggered: t.fallbackTriggered,
       routingPlan: t.plan,
       retrieval: t.retrieval ? { entries: t.retrieval, confidence: t.retrievalConfidence ?? 0 } : undefined,
-      intent: { intent: t.intent, confidence: null },
+      intent: refused ? { intent: null, confidence: null } : { intent: t.intent, confidence: null },
     },
-    final: t.outcome === "ok" ? {
+    final: t.outcome === "ok" || refused ? {
       metering: {
         model: t.modelId,
         tokens: { prompt: t.promptTokens, completion: t.completionTokens },
@@ -173,6 +179,7 @@ function SessionChat({
   /** Latest requested session for loadTurns — stales out slow list/timeline responses. */
   const turnsReqRef = useRef<string | null>(null);
   const [openTrace, setOpenTrace] = useState<TracePayload | null>(null);
+  const isDesktop = useDesktop();
 
   const refresh = useCallback(async () => {
     try {
@@ -273,200 +280,252 @@ function SessionChat({
     }
   }
 
-  const liveAnswer = final?.refused ? final.message ?? "" : final?.answer ?? streamText;
   // once the persisted turn arrives, the timeline bubble replaces the live one
   // (final alone would render the same exchange twice)
   const showLiveExchange = busy || pendingFinal || fault;
 
-  return (
-    <div className="mx-auto flex flex-col gap-5 pt-5 lg:h-[calc(100svh-8.5rem)] lg:flex-row lg:gap-0">
-      {/* session rail — its own pane from lg up; hidden below lg so the
-          interface is chat-only, no rail stacked on top */}
-      <aside className="hidden shrink-0 flex-col gap-2 lg:flex lg:h-full lg:min-h-0 lg:w-52 lg:border-r lg:border-border lg:pr-5 xl:w-56">
-        <div className="flex shrink-0 items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">sessions</p>
-          <Button size="sm" variant="ghost" onClick={() => void newSession()} title="new session">
-            <MessageSquarePlus className="size-4" />
-          </Button>
-        </div>
-        <div className="flex max-h-[40svh] min-h-0 flex-col gap-1 overflow-y-auto lg:max-h-none lg:flex-1 lg:pb-0">
-          {sessions.length === 0 && (
-            <p className="px-1 text-xs text-muted-foreground">no sessions yet — your first message opens one</p>
-          )}
-          {sessions.map((s) => (
-            <div
-              key={s.uid}
-              className={cn(
-                "group flex items-center gap-1 rounded-lg border px-2 py-1.5 text-left text-xs transition-colors",
-                s.externalId === activeExt ? "border-primary/50 bg-accent" : "border-transparent hover:bg-accent/60",
-              )}
-            >
-              <button
-                className="min-w-0 flex-1 text-start"
-                onClick={() => setActiveExt(s.externalId)}
-                title={s.title}
-              >
-                <p className="truncate font-medium">{s.title || "session"}</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {s.turns} turns · {usd(s.spendUsd)}
-                </p>
-              </button>
-              <button
-                onClick={() => void removeSession(s)}
-                title="delete (soft — history stays in observability)"
-                className="opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:text-destructive"
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      </aside>
+  /* ── shared middle-column markup, rendered from either breakpoint branch ── */
 
-      {/* middle: chat pane on top, X-ray below it from lg (right column from 2xl) */}
-      <section className="flex min-w-0 flex-1 flex-col lg:h-full lg:min-h-0 lg:pl-5 2xl:pr-5">
-        {/* transcript: anchored to the bottom while short, grows + scrolls once long.
-            anchor via the sentinel's mt-auto, NOT justify-end — justify-end in a
-            scroll container makes the top rows unreachable once content overflows */}
-        <div className="flex min-h-[45svh] flex-1 flex-col gap-3 overflow-y-auto pb-4 lg:min-h-0">
-          {exchanges.map((x, i) =>
-            x.kind === "turn" ? (
-              <div key={i}>
-                <button
-                  className="w-full cursor-pointer text-start"
-                  title="view trace"
-                  onClick={() => setOpenTrace({ ...x.turn })}
-                >
-                  <TwoBubbles q={x.turn.question ?? ""} a={x.turn.answer} error={x.turn.error} refused={x.turn.outcome === "refused"} />
-                </button>
-              </div>
-            ) : null,
-          )}
-          {showLiveExchange && (
+  // transcript: anchored to the bottom while short, grows + scrolls once long.
+  // anchor via the sentinel's mt-auto, NOT justify-end — justify-end in a
+  // scroll container makes the top rows unreachable once content overflows
+  const transcript = (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden pb-4 pt-5">
+      {exchanges.map((x, i) =>
+        x.kind === "turn" ? (
+          <div key={i}>
             <button
-              className="w-full cursor-pointer text-start disabled:cursor-default"
-              title={busy ? undefined : "view trace"}
-              onClick={() =>
-                setOpenTrace({
-                  id: meta?.requestId ?? "-",
-                  createdAt: new Date().toISOString(),
-                  capability: capability === "chat" ? "chat" : "support-assistant",
-                  keyLabel: null,
-                  backendId: meta?.backend?.id ?? "none",
-                  modelId: meta?.backend?.model ?? "none",
-                  tokens: final?.metering ? final.metering.tokens.prompt + final.metering.tokens.completion : undefined,
-                  costUsd: final?.metering?.estimatedCostUsd,
-                  latencyMs: final?.metering?.latencyMs,
-                  outcome: fault ? "failed" : final?.refused ? "refused" : "ok",
-                  question: input,
-                  answer: fault ? null : final?.refused ? final.message ?? null : (final?.answer ?? streamText) || null,
-                  retrievalConfidence: meta?.retrieval?.confidence ?? null,
-                  retrieval: meta?.retrieval?.entries ?? null,
-                  intent: meta?.intent?.intent ?? null,
-                  error: fault?.message ?? null,
-                  plan: meta?.routingPlan ?? [],
-                  fallbackTriggered: meta?.fallbackTriggered,
-                })
-              }
-              disabled={busy}
+              className="w-full cursor-pointer text-start"
+              title="view trace"
+              onClick={() => setOpenTrace({ ...x.turn })}
             >
-              <TwoBubbles
-                q={input}
-                a={final?.refused ? final.message ?? "" : (final?.answer ?? streamText) || null}
-                error={fault?.message ?? null}
-                refused={final?.refused === true}
-                live={busy && !streamText}
-              />
+              <TwoBubbles q={x.turn.question ?? ""} a={x.turn.answer} error={x.turn.error} refused={x.turn.outcome === "refused"} />
             </button>
-          )}
-          {exchanges.length === 0 && !showLiveExchange && (
-            <div className="mt-6">
-              <p className="mb-3 text-center text-sm text-muted-foreground">start with one of these, or type your own</p>
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                {EXAMPLES.map((ex) => (
-                  <Button key={ex} variant="outline" size="sm" className="rounded-full" onClick={() => setInput(ex)}>
-                    <Sparkles className="size-3.5 text-muted-foreground" />
-                    {ex}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-          {/* scroll target + bottom anchor (see note on the container) */}
-          <div ref={chatBottomRef} className="mt-auto" />
+          </div>
+        ) : null,
+      )}
+      {showLiveExchange && (
+        <button
+          className="w-full cursor-pointer text-start disabled:cursor-default"
+          title={busy ? undefined : "view trace"}
+          onClick={() =>
+            setOpenTrace({
+              id: meta?.requestId ?? "-",
+              createdAt: new Date().toISOString(),
+              capability: capability === "chat" ? "chat" : "support-assistant",
+              keyLabel: null,
+              backendId: meta?.backend?.id ?? "none",
+              modelId: meta?.backend?.model ?? "none",
+              tokens: final?.metering ? final.metering.tokens.prompt + final.metering.tokens.completion : undefined,
+              costUsd: final?.metering?.estimatedCostUsd,
+              latencyMs: final?.metering?.latencyMs,
+              outcome: fault ? "failed" : final?.refused ? "refused" : "ok",
+              question: input,
+              answer: fault ? null : final?.refused ? final.message ?? null : (final?.answer ?? streamText) || null,
+              retrievalConfidence: meta?.retrieval?.confidence ?? null,
+              retrieval: meta?.retrieval?.entries ?? null,
+              intent: meta?.intent?.intent ?? null,
+              error: fault?.message ?? null,
+              plan: meta?.routingPlan ?? [],
+              fallbackTriggered: meta?.fallbackTriggered,
+            })
+          }
+          disabled={busy}
+        >
+          <TwoBubbles
+            q={input}
+            a={final?.refused ? final.message ?? "" : (final?.answer ?? streamText) || null}
+            error={fault?.message ?? null}
+            refused={final?.refused === true}
+            live={busy && !streamText}
+          />
+        </button>
+      )}
+      {exchanges.length === 0 && !showLiveExchange && (
+        <div className="mt-6">
+          <p className="mb-3 text-center text-sm text-muted-foreground">start with one of these, or type your own</p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {EXAMPLES.map((ex) => (
+              <Button key={ex} variant="outline" size="sm" className="rounded-full" onClick={() => setInput(ex)}>
+                <Sparkles className="size-3.5 text-muted-foreground" />
+                {ex}
+              </Button>
+            ))}
+          </div>
         </div>
-
-        {/* composer, Claude/Gemini-style: stays put at the bottom of the pane */}
-        <div className="sticky bottom-24 z-10 md:bottom-4">
-          <Card>
-            <CardContent className="p-4">
-              <form onSubmit={send}>
-                <Textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask a support question…"
-                  rows={3}
-                  onKeyDown={(e) => {
-                    // Enter sends, Shift+Enter (and IME composition) inserts a newline
-                    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
-                    e.preventDefault();
-                    void send(e);
-                  }}
-                />
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  {/* capability mode picker, inside the composer (Gemini-style) */}
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button" size="sm" variant={capability === "assistant" ? "secondary" : "ghost"}
-                      className="h-7 rounded-full px-2.5 text-xs"
-                      onClick={() => onCapability("assistant")}
-                      title="grounded support assistant — retrieval, intent, refusal"
-                    >
-                      <Sparkles className="size-3" /> assistant
-                    </Button>
-                    <Button
-                      type="button" size="sm" variant={capability === "chat" ? "secondary" : "ghost"}
-                      className="h-7 rounded-full px-2.5 text-xs"
-                      onClick={() => onCapability("chat")}
-                      title="plain chat capability — no retrieval"
-                    >
-                      <MessageSquareText className="size-3" /> chat
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button type="button" variant="ghost" size="icon" onClick={() => void newSession()} title="new session" className="size-7 text-muted-foreground hidden sm:inline-flex">
-                      <MessageSquarePlus className="size-3.5" />
-                    </Button>
-                    {busy ? (
-                      <Button type="button" variant="outline" size="icon" onClick={() => abortRef.current?.abort()} title="stop" className="size-8">
-                        <Square className="size-3.5" />
-                      </Button>
-                    ) : (
-                      <Button type="submit" size="icon" disabled={!input.trim()} title="send" className="size-8 rounded-full">
-                        <ArrowUp className="size-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* X-ray under the chat on lg–2xl, sized to its content (no blank tail) */}
-        <div className="hidden min-w-0 flex-col gap-4 lg:flex 2xl:hidden lg:mt-5 lg:max-h-[45svh] lg:shrink-0 lg:overflow-y-auto lg:border-t lg:border-border lg:pt-5">
-          <Xray meta={meta ?? restored?.meta ?? null} final={final ?? restored?.final ?? null} fault={fault ?? restored?.fault ?? null} capability={capability} />
-        </div>
-      </section>
-
-      {/* X-ray as its own right column on 2xl, divider on its left */}
-      <aside className="hidden min-w-0 shrink-0 flex-col gap-4 overflow-y-auto 2xl:flex 2xl:h-full 2xl:w-[340px] 2xl:border-l 2xl:border-border 2xl:pl-5">
-        <Xray meta={meta ?? restored?.meta ?? null} final={final ?? restored?.final ?? null} fault={fault ?? restored?.fault ?? null} capability={capability} />
-      </aside>
-
-      <TraceDialog trace={openTrace} onClose={() => setOpenTrace(null)} />
+      )}
+      {/* scroll target + bottom anchor (see note on the container) */}
+      <div ref={chatBottomRef} className="mt-auto" />
     </div>
   );
+
+  // composer sits at the bottom of the column (flex layout does the pinning —
+  // sticky is gone now that the column itself never scrolls)
+  const composer = (
+    <Card className="shrink-0">
+      <CardContent className="p-4">
+        <form onSubmit={send}>
+          <Textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask a support question…"
+            rows={3}
+            onKeyDown={(e) => {
+              // Enter sends, Shift+Enter (and IME composition) inserts a newline
+              if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              void send(e);
+            }}
+          />
+          <div className="mt-3 flex items-center justify-between gap-2">
+            {/* capability mode picker, inside the composer (Gemini-style) */}
+            <div className="flex items-center gap-1">
+              <Button
+                type="button" size="sm" variant={capability === "assistant" ? "secondary" : "ghost"}
+                className="h-7 rounded-full px-2.5 text-xs"
+                onClick={() => onCapability("assistant")}
+                title="grounded support assistant — retrieval, intent, refusal"
+              >
+                <Sparkles className="size-3" /> assistant
+              </Button>
+              <Button
+                type="button" size="sm" variant={capability === "chat" ? "secondary" : "ghost"}
+                className="h-7 rounded-full px-2.5 text-xs"
+                onClick={() => onCapability("chat")}
+                title="plain chat capability — no retrieval"
+              >
+                <MessageSquareText className="size-3" /> chat
+              </Button>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button type="button" variant="ghost" size="icon" onClick={() => void newSession()} title="new session" className="size-7 text-muted-foreground hidden sm:inline-flex">
+                <MessageSquarePlus className="size-3.5" />
+              </Button>
+              {busy ? (
+                <Button type="button" variant="outline" size="icon" onClick={() => abortRef.current?.abort()} title="stop" className="size-8">
+                  <Square className="size-3.5" />
+                </Button>
+              ) : (
+                <Button type="submit" size="icon" disabled={!input.trim()} title="send" className="size-8 rounded-full">
+                  <ArrowUp className="size-3.5" />
+                </Button>
+              )}
+            </div>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+
+  // refusing is a decision, not an outage: the X-ray must carry it (the policy
+  // gate, the zero-token metering, the "no intent applied" note)
+  const refused = (meta !== null || final !== null)
+    ? (meta?.refusal === true || final?.refused === true)
+    : (restored?.refused ?? false);
+  const xray = (
+    <Xray
+      meta={meta ?? restored?.meta ?? null}
+      final={final ?? restored?.final ?? null}
+      fault={fault ?? restored?.fault ?? null}
+      refused={refused}
+      capability={capability}
+    />
+  );
+  const traceDialog = <TraceDialog trace={openTrace} onClose={() => setOpenTrace(null)} />;
+
+  // below lg: chat-only, no rail — the transcript is the one scroll container
+  if (!isDesktop) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {transcript}
+        <div className="pb-1 pt-3">{composer}</div>
+        {traceDialog}
+      </div>
+    );
+  }
+
+  // lg and up: three resizable panels — sessions / chat / inspector (X-ray).
+  // The Group fills the main column exactly (the shell pins main's height and
+  // hides overflow there), so no window-level scrollbar ever exists to fight
+  // with; each panel scrolls internally instead.
+  return (
+    <ResizablePanelGroup direction="horizontal">
+      <ResizablePanel id="sessions" defaultSize="20" minSize="15" maxSize="30">
+        <aside className="flex h-full min-w-0 flex-col">
+          <div className="flex shrink-0 items-center justify-between p-4 pb-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">sessions</p>
+            <Button size="sm" variant="ghost" onClick={() => void newSession()} title="new session">
+              <MessageSquarePlus className="size-4" />
+            </Button>
+          </div>
+          {/* strict scroll containment: the rail scrolls here, never the panel */}
+          <div className="min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-4 pb-4">
+            {sessions.length === 0 && (
+              <p className="px-1 text-xs text-muted-foreground">no sessions yet — your first message opens one</p>
+            )}
+            {sessions.map((s) => (
+              <div
+                key={s.uid}
+                className={cn(
+                  "group flex items-center gap-1 rounded-lg border px-2 py-1.5 text-left text-xs transition-colors",
+                  s.externalId === activeExt ? "border-primary/50 bg-accent" : "border-transparent hover:bg-accent/60",
+                )}
+              >
+                <button
+                  className="min-w-0 flex-1 text-start"
+                  onClick={() => setActiveExt(s.externalId)}
+                  title={s.title}
+                >
+                  <p className="truncate font-medium">{s.title || "session"}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {s.turns} turns · {usd(s.spendUsd)}
+                  </p>
+                </button>
+                <button
+                  onClick={() => void removeSession(s)}
+                  title="delete (soft — history stays in observability)"
+                  className="opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100 hover:text-destructive"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </aside>
+      </ResizablePanel>
+
+      <ResizableHandle id="split-sessions" withHandle />
+
+      <ResizablePanel id="chat" defaultSize="50" minSize="35">
+        <section className="flex h-full min-w-0 flex-col">
+          {transcript}
+          <div className="pb-4 pt-3">{composer}</div>
+        </section>
+      </ResizablePanel>
+
+      <ResizableHandle id="split-inspector" withHandle />
+
+      <ResizablePanel id="inspector" defaultSize="30" minSize="20" maxSize="45">
+        {/* inspector scrolls in its own column; p-4 keeps cards off the divider */}
+        <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden p-4">{xray}</div>
+      </ResizablePanel>
+
+      {traceDialog}
+    </ResizablePanelGroup>
+  );
+}
+
+/** Tailwind's lg breakpoint in px, without a media-query helper dependency. */
+function useDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia("(min-width: 64rem)").matches);
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 64rem)");
+    const onChange = (e: MediaQueryListEvent): void => setIsDesktop(e.matches);
+    setIsDesktop(mql.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+  return isDesktop;
 }
 
 function TwoBubbles({ q, a, error, refused, live }: { q: string; a: string | null; error: string | null; refused?: boolean; live?: boolean }): React.ReactElement {
@@ -478,7 +537,8 @@ function TwoBubbles({ q, a, error, refused, live }: { q: string; a: string | nul
       {error ? (
         <Bubble role="assistant" tone="error">{error}</Bubble>
       ) : refused ? (
-        <Bubble role="assistant" tone="warning">{a}</Bubble>
+        // pre-fix refusals persisted no text — never paint an empty bubble
+        <Bubble role="assistant" tone="warning">{a || "refused — the policy gate declined to answer this."}</Bubble>
       ) : (
         <Bubble role="assistant" live={live}>
           <Markdown text={a ?? ""} />
@@ -488,29 +548,36 @@ function TwoBubbles({ q, a, error, refused, live }: { q: string; a: string | nul
   );
 }
 
-export function Xray({ meta, final, fault, capability = "assistant" }: { meta: StreamMeta | null; final: StreamFinal | null; fault: Fault | null; capability?: Capability }): React.ReactElement {
+export function Xray({ meta, final, fault, refused = false, capability = "assistant" }: { meta: StreamMeta | null; final: StreamFinal | null; fault: Fault | null; refused?: boolean; capability?: Capability }): React.ReactElement {
   // Container-width layout: cards stack in narrow columns, row up in the
   // wide strip — viewport breakpoints can't express both from one component.
+  // Every card carries w-full min-w-0: panels get narrow, and without it the
+  // grid children overflow and force a horizontal scrollbar in the inspector.
   return (
-    <div className="@container">
-      <div className="grid gap-4 @xl:grid-cols-3">
-        <Card>
+    <div className="@container w-full min-w-0">
+      <div className="grid w-full min-w-0 gap-4 @xl:grid-cols-3">
+        <Card className="w-full min-w-0">
           <CardHeader><CardTitle>routing</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="w-full min-w-0 space-y-2">
             {fault && <p className="text-sm text-destructive">{fault.code}</p>}
             {meta ? (
               <>
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="info">{meta.backend?.id}</Badge>
-                  <span className="font-mono text-xs text-muted-foreground">{meta.backend?.model}</span>
+                  {refused && <Badge variant="warning">refused</Badge>}
+                  <span className="min-w-0 font-mono text-xs text-muted-foreground" title={meta.backend?.model}>{meta.backend?.model}</span>
                   {meta.fallbackTriggered ? <Badge variant="warning">fallback fired</Badge> : <Badge variant="secondary">fallback idle</Badge>}
                 </div>
                 <ol className="mt-1 space-y-1.5">
                   {meta.routingPlan?.map((s, i) => (
-                    <li key={i} className="flex items-start gap-2 text-xs">
+                    // badge + id on a line, reason in its own block below — a
+                    // squeezed flex row would break the reason mid-word
+                    <li key={i} className="flex min-w-0 items-start gap-2 text-xs">
                       <Badge variant={outcomeBadge(s.action)}>{s.action}</Badge>
-                      <span className="font-mono">{s.backendId}</span>
-                      <span className="text-muted-foreground">{s.reason}</span>
+                      <div className="min-w-0">
+                        <span className="font-mono">{s.backendId}</span>
+                        <p className="text-muted-foreground">{s.reason}</p>
+                      </div>
                     </li>
                   ))}
                 </ol>
@@ -519,20 +586,27 @@ export function Xray({ meta, final, fault, capability = "assistant" }: { meta: S
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="w-full min-w-0">
           <CardHeader><CardTitle>retrieval</CardTitle></CardHeader>
-          <CardContent>
+          <CardContent className="w-full min-w-0">
             {meta?.retrieval ? (
-              <div className="space-y-2">
+              <div className="w-full min-w-0 space-y-2">
                 <p className="flex items-baseline gap-1">
                   <span className="text-2xl font-semibold">{meta.retrieval.confidence.toFixed(2)}</span>
                   <span className="text-xs text-muted-foreground">confidence</span>
+                  {refused && <Badge variant="warning" className="ml-auto text-[10px]">below refusal floor</Badge>}
                 </p>
-                <ul className="space-y-1.5">
+                {refused && (
+                  <p className="text-xs text-muted-foreground">
+                    no answer was generated — policy refused rather than guess.
+                  </p>
+                )}
+                <ul className="min-w-0 space-y-1.5">
+                  {/* truncate + title: full question is on hover, whole string scrolls away */}
                   {meta.retrieval.entries.map((e) => (
-                    <li key={e.id} className="truncate text-xs text-muted-foreground">
+                    <li key={e.id} className="min-w-0 truncate text-xs text-muted-foreground" title={e.question}>
                       <Badge variant="outline" className="mr-1.5 text-[10px]">{e.intent}</Badge>
-                      {e.question.slice(0, 48)}
+                      {e.question}
                     </li>
                   ))}
                 </ul>
@@ -541,12 +615,22 @@ export function Xray({ meta, final, fault, capability = "assistant" }: { meta: S
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="w-full min-w-0">
           <CardHeader><CardTitle>intent</CardTitle></CardHeader>
-          <CardContent>
-            {meta?.intent ? (
+          <CardContent className="w-full min-w-0">
+            {refused ? (
+              // a refusal is a policy decision taken before any answer — there
+              // is no intent to show for it
               <div className="space-y-1">
-                <span className={cn("text-lg font-semibold", !meta.intent.intent && "text-muted-foreground")}>
+                <span className="block truncate text-lg font-semibold text-muted-foreground">none</span>
+                <p className="text-xs text-muted-foreground">refused before any answer — no intent applied</p>
+              </div>
+            ) : meta?.intent ? (
+              <div className="space-y-1">
+                <span
+                  className={cn("block truncate text-lg font-semibold", !meta.intent.intent && "text-muted-foreground")}
+                  title={meta.intent.intent ?? "none"}
+                >
                   {meta.intent.intent ?? "none"}
                 </span>
                 <p className="text-xs text-muted-foreground">
@@ -557,17 +641,20 @@ export function Xray({ meta, final, fault, capability = "assistant" }: { meta: S
           </CardContent>
         </Card>
 
-        <Card className="@xl:col-span-3">
+        <Card className="@xl:col-span-3 w-full min-w-0">
           <CardHeader><CardTitle>metering</CardTitle></CardHeader>
-          <CardContent>
+          <CardContent className="w-full min-w-0">
             {final?.metering ? (
-              <div className="grid grid-cols-2 gap-3 @xl:grid-cols-4">
+              <div className="grid w-full min-w-0 grid-cols-2 gap-3 @xl:grid-cols-4">
                 <Metric label="model" value={final.metering.model.replace(/^google\/|^anthropic\//, "")} />
                 <Metric label="latency" value={`${final.metering.latencyMs} ms`} />
                 <Metric label="tokens" value={`${final.metering.tokens.prompt} + ${final.metering.tokens.completion}`} />
                 <Metric label="cost" value={usd(final.metering.estimatedCostUsd)} hint={final.metering.costSource} />
               </div>
             ) : <p className="text-sm text-muted-foreground">waiting…</p>}
+            {refused && final?.metering && (
+              <p className="mt-3 text-xs text-muted-foreground">refused before routing — no model called, nothing spent.</p>
+            )}
             {final?.quota && (
               <p className="mt-3 text-xs text-muted-foreground">
                 quota today: {final.quota.used.requestCount}/{final.quota.limits.requestsPerDay} requests · spend $
@@ -584,9 +671,12 @@ export function Xray({ meta, final, fault, capability = "assistant" }: { meta: S
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }): React.ReactElement {
   return (
-    <div>
+    // min-w-0 on the cell + truncate on the value keeps ids like
+    // gemini-2.5-flash-lite on one line (ellipsis + hover title) instead of
+    // wrapping character by character in a narrow grid column
+    <div className="min-w-0">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-mono text-sm font-semibold">{value}</p>
+      <p className="truncate font-mono text-sm font-semibold" title={value}>{value}</p>
       {hint && <p className="text-[10px] text-muted-foreground">{hint}</p>}
     </div>
   );

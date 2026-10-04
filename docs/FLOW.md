@@ -95,11 +95,16 @@ if (confidence < 0.48)  // config.assistant.refuseBelowConfidence
 ```
 
 → **no model is called at all**. The response streams `meta {refusal: true,
-reason}` then `final {refused: true, message, reasoning: "retrieval confidence
-0.31 < floor 0.48", metering: {model: "none", tokens: 0, cost: 0}}`. It still
-writes a routing decision (`backendId: "none", action: "blocked_policy"`) and a
-`requests` row with `outcome: "refused"`, and `bumpQuota(tenant, 0)` — the
-refusal consumes a *request* slot but zero tokens, because nothing was spent.
+reason, backend: "none", routingPlan: [blocked_policy]}` then `final {refused:
+true, message, reasoning: "retrieval confidence 0.31 < floor 0.48", metering:
+{model: "none", tokens: 0, cost: 0}}` — the refusal is a first-class routing
+outcome, so the console's X-ray (routing pills, metering, "no intent applied")
+replays it exactly like a served turn. It still writes a routing decision
+(`backendId: "none", action: "blocked_policy"`) and a `requests` row with
+`outcome: "refused"` — with the refusal text as the turn's `answer`, so the
+session transcript replays what the user was actually told — and
+`bumpQuota(tenant, 0)`: the refusal consumes a *request* slot but zero tokens,
+because nothing was spent.
 
 Why this ordering matters: the refusal is a **policy** decision, not a routing
 decision. Choosing between tier A and tier B is meaningless if the gateway has

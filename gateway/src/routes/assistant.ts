@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { errorBody } from "../lib/errors.js";
 import { bumpQuota, readUsage } from "../lib/quota.js";
-import { recordRequest, recordRoutingDecision } from "../lib/metering.js";
+import { recordRequest, recordRoutingDecision, type PlanStep } from "../lib/metering.js";
 import { openSse, writeEvent, closeSse } from "../lib/sse.js";
 import { buildRoutePlan, type RouteContext } from "../routing/rules.js";
 import { openWithFallback } from "../routing/dispatch.js";
@@ -54,22 +54,37 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
       //    nothing to stand on: refuse rather than guess (brief, Support
       //    assistant). Still metered + recorded as a decided outcome.
       if (confidence < config.assistant.refuseBelowConfidence) {
+        const latencyMs = Date.now() - started;
+        const reason = `retrieval confidence ${confidence.toFixed(2)} below refusal floor`;
+        const plan: PlanStep[] = [{ backendId: "none", action: "blocked_policy", reason }];
+        const message =
+          "I don't have reliable information on that in the support knowledge base, so I won't guess. Could you rephrase, or contact support directly?";
         openSse(reply, requestId);
+        // Same shape as a served turn's meta, with the refusal as the routing
+        // outcome — the X-ray's routing pills come from here. Intent is NOT
+        // included: the policy gate refused before anything acted on the
+        // question, so there is no intent to show (refusal reasons live in
+        // the retrieval card).
         writeEvent(reply, {
           type: "meta",
-          data: { requestId, refusal: true, reason: "low_retrieval_confidence", retrieval: { entries, confidence } },
+          data: {
+            requestId, refusal: true, reason: "low_retrieval_confidence",
+            backend: { id: "none", label: "policy refusal", model: "none" },
+            fallbackTriggered: false, routingPlan: plan,
+            retrieval: { entries, confidence },
+          },
         });
         await recordRoutingDecision({
           requestId, tenantId: tenant.id, capability: "support-assistant",
-          plan: [{ backendId: "none", action: "blocked_policy", reason: `retrieval confidence ${confidence.toFixed(2)} below refusal floor` }],
-          fallbackTriggered: false,
+          plan, fallbackTriggered: false,
         });
         await recordRequest({
           tenantId: tenant.id, capability: "support-assistant", ...reqKey(req), backendId: "none", modelId: "none",
-          promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
+          promptTokens: 0, completionTokens: 0, latencyMs,
           estimatedCostUsd: 0, outcome: "refused",
           retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
-          question: req.body.message, retrievalJson: JSON.stringify(entries), chatSessionUid: chatSession?.uid,
+          question: req.body.message, answer: message,
+          retrievalJson: JSON.stringify(entries), chatSessionUid: chatSession?.uid,
         }, requestId);
         // A refusal is still a served request — it consumes a request slot,
         // zero tokens (no model was called).
@@ -81,12 +96,13 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
           type: "final",
           data: {
             refused: true,
-            message:
-              "I don't have reliable information on that in the support knowledge base, so I won't guess. Could you rephrase, or contact support directly?",
+            message,
             reasoning: `retrieval confidence ${confidence.toFixed(2)} < floor ${config.assistant.refuseBelowConfidence}`,
             retrieval: { entries, confidence },
+            // kept for the trace/eval record; the console hides it on refusals
+            // — no answer was generated, so no intent was applied
             intent: intentResult,
-            metering: { model: "none", tokens: { prompt: 0, completion: 0 }, latencyMs: Date.now() - started, estimatedCostUsd: 0, costSource: "n/a" },
+            metering: { model: "none", tokens: { prompt: 0, completion: 0 }, latencyMs, estimatedCostUsd: 0, costSource: "n/a" },
           },
         });
         closeSse(reply);
