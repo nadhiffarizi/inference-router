@@ -35,14 +35,20 @@ One system, three pieces:
    service: retrieval → confidence → (refuse | route) → grounded answer +
    intent, on the same auth/quota/metering path as plain chat. Optional
    caller-declared `sessionId` groups turns into sessions (grouping only —
-   never model context).
+   never model context; every turn is answered on its own, §6).
 3. **Console** (React/Vite, shadcn-style design system) — accounts (session
    login, no JWT), role-scoped sidebar: product team sees `Playground ·
    API Keys · Usage`; admin is a tenant like any other plus one extra menu,
    `Observability`: fleet usage, per-key breakdown, the activity feed
    (openrouter-style: one row per gateway call), and trace/session viewers
    (Langfuse-style: question, answer, retrieval, routing plan, metering per
-   turn), all from stored turn traces.
+   turn), all from stored turn traces. The Playground chat keeps the message
+   stream and the composer inside one shared padded column, so every bubble
+   edge lines up with the textarea's edges (user right-aligned to the input
+   box's right edge, assistant flushed with its left) on both the desktop
+   three-panel layout and the mobile single column; the composer itself
+   carries no horizontal chrome that could offset the input box from the
+   transcript.
 
 ## 2. Routing: the rules and why
 
@@ -155,8 +161,11 @@ Measured routing behaviour (also shown live in the decision log):
 
 Cut deliberately rather than half-build (**still cut**):
 
-- Conversation history / multi-turn model memory (sessions group traces; the
-  model stays single-turn — see D15 for the boundary).
+- Conversation history / multi-turn model memory — **each request is answered
+  from exactly one turn**. `sessionId` groups traces for observability only
+  and is never injected as context, so a follow-up like *"and what about the
+  second item?"* finds no prior state and must be asked standalone. The
+  boundary is D10's cut, restated in D15.
 - Full RBAC — no users × permissions matrix; identity is one role bit on a
   tenant-scoped account (D11).
 - Sliding-window quotas (fixed daily window), retries beyond one fallback hop,
