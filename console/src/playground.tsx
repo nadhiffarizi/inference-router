@@ -360,62 +360,62 @@ function SessionChat({
     </div>
   );
 
-  // composer sits at the bottom of the column (flex layout does the pinning —
-  // sticky is gone now that the column itself never scrolls)
+  // Composer sits at the bottom of the column (flex layout does the pinning —
+  // sticky is gone now that the column itself never scrolls) and carries **no**
+  // horizontal chrome of its own: the padded column around transcript +
+  // composer is the only horizontal inset, so both bubble edges line up with
+  // the textarea's edges instead of bubbles touching the panel edge while the
+  // composer's card padding inset it.
   const composer = (
-    <Card className="shrink-0">
-      <CardContent className="p-4">
-        <form onSubmit={send}>
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a support question…"
-            rows={3}
-            onKeyDown={(e) => {
-              // Enter sends, Shift+Enter (and IME composition) inserts a newline
-              if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
-              e.preventDefault();
-              void send(e);
-            }}
-          />
-          <div className="mt-3 flex items-center justify-between gap-2">
-            {/* capability mode picker, inside the composer (Gemini-style) */}
-            <div className="flex items-center gap-1">
-              <Button
-                type="button" size="sm" variant={capability === "assistant" ? "secondary" : "ghost"}
-                className="h-7 rounded-full px-2.5 text-xs"
-                onClick={() => onCapability("assistant")}
-                title="grounded support assistant — retrieval, intent, refusal"
-              >
-                <Sparkles className="size-3" /> assistant
-              </Button>
-              <Button
-                type="button" size="sm" variant={capability === "chat" ? "secondary" : "ghost"}
-                className="h-7 rounded-full px-2.5 text-xs"
-                onClick={() => onCapability("chat")}
-                title="plain chat capability — no retrieval"
-              >
-                <MessageSquareText className="size-3" /> chat
-              </Button>
-            </div>
-            <div className="flex items-center gap-1">
-              <Button type="button" variant="ghost" size="icon" onClick={() => void newSession()} title="new session" className="size-7 text-muted-foreground hidden sm:inline-flex">
-                <MessageSquarePlus className="size-3.5" />
-              </Button>
-              {busy ? (
-                <Button type="button" variant="outline" size="icon" onClick={() => abortRef.current?.abort()} title="stop" className="size-8">
-                  <Square className="size-3.5" />
-                </Button>
-              ) : (
-                <Button type="submit" size="icon" disabled={!input.trim()} title="send" className="size-8 rounded-full">
-                  <ArrowUp className="size-3.5" />
-                </Button>
-              )}
-            </div>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+    <form onSubmit={send} className="shrink-0">
+      <Textarea
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="Ask a support question…"
+        rows={3}
+        onKeyDown={(e) => {
+          // Enter sends, Shift+Enter (and IME composition) inserts a newline
+          if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          void send(e);
+        }}
+      />
+      <div className="mt-3 flex items-center justify-between gap-2">
+        {/* capability mode picker, inside the composer (Gemini-style) */}
+        <div className="flex items-center gap-1">
+          <Button
+            type="button" size="sm" variant={capability === "assistant" ? "secondary" : "ghost"}
+            className="h-7 rounded-full px-2.5 text-xs"
+            onClick={() => onCapability("assistant")}
+            title="grounded support assistant — retrieval, intent, refusal"
+          >
+            <Sparkles className="size-3" /> assistant
+          </Button>
+          <Button
+            type="button" size="sm" variant={capability === "chat" ? "secondary" : "ghost"}
+            className="h-7 rounded-full px-2.5 text-xs"
+            onClick={() => onCapability("chat")}
+            title="plain chat capability — no retrieval"
+          >
+            <MessageSquareText className="size-3" /> chat
+          </Button>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button type="button" variant="ghost" size="icon" onClick={() => void newSession()} title="new session" className="size-7 text-muted-foreground hidden sm:inline-flex">
+            <MessageSquarePlus className="size-3.5" />
+          </Button>
+          {busy ? (
+            <Button type="button" variant="outline" size="icon" onClick={() => abortRef.current?.abort()} title="stop" className="size-8">
+              <Square className="size-3.5" />
+            </Button>
+          ) : (
+            <Button type="submit" size="icon" disabled={!input.trim()} title="send" className="size-8 rounded-full">
+              <ArrowUp className="size-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </form>
   );
 
   // refusing is a decision, not an outage: the X-ray must carry it (the policy
@@ -434,12 +434,24 @@ function SessionChat({
   );
   const traceDialog = <TraceDialog trace={openTrace} onClose={() => setOpenTrace(null)} />;
 
+  /* One padded column for the whole chat: the transcript and the composer live
+     in a shared container with uniform horizontal padding, so every chat
+     element — user bubble right edge, assistant bubble left edge, textarea —
+     sits on the same left/right margins instead of the bubbles touching the
+     panel edge while the composer's own padding inset it. Vertical rhythm
+     stays here (pinned to the bottom); the transcript handles its own. */
+  const chatColumn = (
+    <div className="flex h-full min-h-0 flex-1 flex-col px-4 md:px-6">
+      {transcript}
+      <div className="pb-1 pt-4">{composer}</div>
+    </div>
+  );
+
   // below lg: chat-only, no rail — the transcript is the one scroll container
   if (!isDesktop) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        {transcript}
-        <div className="pb-1 pt-3">{composer}</div>
+        {chatColumn}
         {traceDialog}
       </div>
     );
@@ -498,10 +510,7 @@ function SessionChat({
       <ResizableHandle id="split-sessions" withHandle />
 
       <ResizablePanel id="chat" defaultSize="50" minSize="35">
-        <section className="flex h-full min-w-0 flex-col">
-          {transcript}
-          <div className="pb-4 pt-3">{composer}</div>
-        </section>
+        {chatColumn}
       </ResizablePanel>
 
       <ResizableHandle id="split-inspector" withHandle />
