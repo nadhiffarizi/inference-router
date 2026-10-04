@@ -34,6 +34,7 @@ export type MeteredResult = {
   question?: string;
   answer?: string;
   retrievalJson?: string;
+  chatSessionUid?: number;
 };
 
 export async function recordRequest(result: MeteredResult, requestId: string): Promise<void> {

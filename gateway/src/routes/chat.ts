@@ -9,6 +9,7 @@ import { openWithFallback } from "../routing/dispatch.js";
 import type { ModelAdapter, StreamRequest } from "../backends/types.js";
 import { estimateCost } from "../backends/types.js";
 import { authenticate } from "../plugins/auth.js";
+import { resolveOrCreateSession } from "../lib/chatSessions.js";
 
 /** The plain-chat capability: tenant-supplied message, streamed answer. */
 
@@ -18,6 +19,7 @@ const BodySchema = {
   properties: {
     message: { type: "string", minLength: 1, maxLength: 8000 },
     maxTokens: { type: "integer", minimum: 16, maximum: 2000, default: 700 },
+    sessionId: { type: "string", maxLength: 100 },
   },
   additionalProperties: false,
 } as const;
@@ -34,7 +36,7 @@ export function registerChatRoute(
   systemPrompt: string,
 ): void {
   app.post<{
-    Body: { message: string; maxTokens?: number };
+    Body: { message: string; maxTokens?: number; sessionId?: string };
   }>(
     "/v1/chat",
     {
@@ -45,6 +47,7 @@ export function registerChatRoute(
       const tenant = req.tenant!;
       const requestId = randomUUID();
       const started = Date.now();
+      const chatSession = await resolveOrCreateSession(tenant.id, req.body.sessionId, req.body.message);
 
       const routeCtx: RouteContext = { capability: "chat", question: req.body.message };
       const plan = buildRoutePlan(routeCtx, byId);
@@ -71,7 +74,7 @@ export function registerChatRoute(
         await recordRequest({
           tenantId: tenant.id, capability: "chat", ...reqKey(req), backendId: "none", modelId: "none",
           promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
-          estimatedCostUsd: 0, outcome: "failed", error: outcome.lastError, question: req.body.message,
+          estimatedCostUsd: 0, outcome: "failed", error: outcome.lastError, question: req.body.message, chatSessionUid: chatSession?.uid,
         }, requestId);
         return closeSse(reply);
       }
@@ -108,7 +111,7 @@ export function registerChatRoute(
         modelId: outcome.chosen.meta.modelId, promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
         outcome: streamError ? "failed" : "ok", error: streamError,
-        question: req.body.message, answer, // turn trace (Langfuse-mini)
+        question: req.body.message, answer, chatSessionUid: chatSession?.uid, // turn trace (Langfuse-mini)
       }, requestId);
       await bumpQuota(tenant.id, usage.promptTokens + usage.completionTokens).catch((err) =>
         console.error({ msg: "quota bump failed", requestId, err: String(err) }));

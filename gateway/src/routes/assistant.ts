@@ -11,6 +11,7 @@ import { estimateCost } from "../backends/types.js";
 import { authenticate } from "../plugins/auth.js";
 import { detectIntent, retrieve } from "../rag/kb.js";
 import { config } from "../config.js";
+import { resolveOrCreateSession } from "../lib/chatSessions.js";
 
 /**
  * The support-assistant capability (the brief's "one capability on top of it").
@@ -26,18 +27,24 @@ const BodySchema = {
   properties: {
     message: { type: "string", minLength: 1, maxLength: 4000 },
     backendPin: { type: "string" },
+    /** Caller-declared session grouping (their ticket/chat id) — optional. */
+    sessionId: { type: "string", maxLength: 100 },
   },
   additionalProperties: false,
 } as const;
 
 export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, ModelAdapter>): void {
-  app.post<{ Body: { message: string; backendPin?: string } }>(
+  app.post<{ Body: { message: string; backendPin?: string; sessionId?: string } }>(
     "/v1/support-assistant",
     { schema: { body: BodySchema }, onRequest: authenticate },
     async (req, reply) => {
       const tenant = req.tenant!;
       const requestId = randomUUID();
       const started = Date.now();
+
+      // 0) Session grouping (caller-declared, tenant-scoped, auto-created on
+      //    first sight). Grouping only — never changes the model's context.
+      const chatSession = await resolveOrCreateSession(tenant.id, req.body.sessionId, req.body.message);
 
       // 1) Retrieve. Confidence is normalized top-hit strength (rag/kb.ts).
       const { entries, confidence } = retrieve(req.body.message);
@@ -74,7 +81,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
           promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
           estimatedCostUsd: 0, outcome: "refused",
           retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
-          question: req.body.message, retrievalJson: JSON.stringify(entries),
+          question: req.body.message, retrievalJson: JSON.stringify(entries), chatSessionUid: chatSession?.uid,
         }, requestId);
         // A refusal is still a served request — it consumes a request slot,
         // zero tokens (no model was called).
@@ -118,7 +125,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
           promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - started,
           estimatedCostUsd: 0, outcome: "failed", error: outcome.lastError,
           retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
-          question: req.body.message, retrievalJson: JSON.stringify(entries),
+          question: req.body.message, retrievalJson: JSON.stringify(entries), chatSessionUid: chatSession?.uid,
         }, requestId);
         closeSse(reply);
         return;
@@ -133,6 +140,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
           routingPlan: outcome.steps,
           retrieval: { entries, confidence },
           intent: intentResult,
+          chatSessionUid: chatSession?.uid,
         },
       });
 
@@ -201,6 +209,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
         outcome: unusable ? "refused" : streamError ? "failed" : "ok",
         error: streamError, retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
         question: req.body.message, answer: unusable ? "" : answer, retrievalJson: JSON.stringify(entries),
+        chatSessionUid: chatSession?.uid,
       }, requestId);
       if (!unusable) {
         await bumpQuota(tenant.id, usage.promptTokens + usage.completionTokens).catch((err) =>

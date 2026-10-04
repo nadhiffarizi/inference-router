@@ -85,6 +85,17 @@ CREATE TABLE IF NOT EXISTS routing_decisions (
 );
 CREATE INDEX IF NOT EXISTS idx_requests_tenant ON requests (tenant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_decisions_request ON routing_decisions (request_id);
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  uid INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  external_id TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT 'new session',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_sessions_tenant_external ON chat_sessions (tenant_id, external_id);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_tenant ON chat_sessions (tenant_id, deleted_at);
 CREATE TABLE IF NOT EXISTS quota_usage (
   tenant_id INTEGER NOT NULL,
   day TEXT NOT NULL,
@@ -120,6 +131,7 @@ export function bootstrapDatabase(): void {
     "ALTER TABLE requests ADD COLUMN question TEXT",
     "ALTER TABLE requests ADD COLUMN answer TEXT",
     "ALTER TABLE requests ADD COLUMN retrieval_json TEXT",
+    "ALTER TABLE requests ADD COLUMN chat_session_uid INTEGER",
   ]) {
     try {
       sqlite.exec(stmt);

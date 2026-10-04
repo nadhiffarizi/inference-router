@@ -70,8 +70,33 @@ export const requests = sqliteTable("requests", {
   question: text("question"),
   answer: text("answer"),
   retrievalJson: text("retrieval_json"),
+  /** Which chat session this turn belongs to (caller-declared, tenant-scoped). */
+  chatSessionUid: integer("chat_session_uid"),
   createdAt: text("created_at").notNull(),
 });
+
+/**
+ * Chat sessions (Langfuse-style logic, own implementation): caller-declared
+ * grouping over traces. The gateway owns tenancy + metering; the caller owns
+ * the identity (their ticket id, their chat id). Soft delete preserves the
+ * trace history for observability — a "deleted" session is hidden from the
+ * product surface, never from the ops surface.
+ */
+export const chatSessions = sqliteTable(
+  "chat_sessions",
+  {
+    uid: integer("uid").primaryKey({ autoIncrement: true }),
+    tenantId: integer("tenant_id").notNull(),
+    /** The caller's own identifier (playground uuid or a support ticket id). */
+    externalId: text("external_id").notNull(),
+    /** Server-set: the first question of the session. */
+    title: text("title").notNull().default("new session"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    /** Soft delete: hidden from the tenant surface, kept for observability. */
+    deletedAt: text("deleted_at"),
+  },
+);
 
 /**
  * One row per request: the ordered candidate plan and what happened to each.

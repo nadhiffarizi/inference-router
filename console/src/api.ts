@@ -137,3 +137,56 @@ export async function fetchUsage(apiKey: string): Promise<UsageResponse> {
   if (!res.ok) throw new Error(`usage failed: HTTP ${res.status}`);
   return (await res.json()) as UsageResponse;
 }
+
+/** ---- chat sessions (Langfuse-style grouping, caller-declared ids) ---- */
+
+export type ChatSessionRow = {
+  uid: number;
+  tenantId: number;
+  externalId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  turns: number;
+  spendUsd: number;
+};
+
+export type Turn = {
+  id: string;
+  createdAt: string;
+  capability: string;
+  keyLabel: string | null;
+  backendId: string;
+  modelId: string;
+  tokens: number;
+  costUsd: number;
+  latencyMs: number;
+  outcome: string;
+  question: string | null;
+  answer: string | null;
+  retrieval: { id: number; question: string; answer: string; intent: string }[] | null;
+  retrievalConfidence: number | null;
+  intent: string | null;
+  error: string | null;
+};
+
+export async function fetchChatSessions(): Promise<ChatSessionRow[]> {
+  const res = await fetch("/v1/console/chat-sessions");
+  if (!res.ok) throw new Error(`sessions failed: HTTP ${res.status}`);
+  const d = (await res.json()) as { sessions: ChatSessionRow[] };
+  return d.sessions;
+}
+
+export async function deleteChatSession(uid: number): Promise<void> {
+  await fetch(`/v1/console/chat-sessions/${uid}`, { method: "DELETE" });
+}
+
+/** Own-tenant session timeline; admin cross-tenant via observability route. */
+export async function fetchSessionTimeline(uid: number, admin = false): Promise<{ session: ChatSessionRow; turns: Turn[] } | null> {
+  const url = admin ? `/v1/console/observability/sessions/${uid}` : `/v1/console/chat-sessions/${uid}`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const d = (await res.json()) as { session: ChatSessionRow; turns: Turn[] };
+  return { session: d.session, turns: d.turns };
+}

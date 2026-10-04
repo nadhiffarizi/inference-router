@@ -10,6 +10,8 @@ import {
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
 import { Stat } from "./usage";
+import { Bubble } from "./lib/chatui";
+import { fetchSessionTimeline, type Turn } from "./api";
 
 /**
  * Admin-only cross-tenant view: usage for every tenant plus the routing
@@ -38,6 +40,18 @@ type ActivityRow = {
   error: string | null;
 };
 
+type SessionRow = {
+  uid: number;
+  tenantName: string;
+  externalId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  turns: number;
+  spendUsd: number;
+};
+
 type Observability = {
   tenants: {
     tenant: { id: number; name: string };
@@ -48,6 +62,7 @@ type Observability = {
   }[];
   keys?: { tenant: string; label: string; maskedKey: string | null; requests: number; tokens: number; costUsd: number }[];
   activity?: ActivityRow[];
+  sessions?: SessionRow[];
   decisions: {
     requestId: string;
     tenantId: number;
@@ -63,6 +78,7 @@ export function ObservabilityView(): React.ReactElement {
   const [data, setData] = useState<Observability | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openTrace, setOpenTrace] = useState<ActivityRow | null>(null);
+  const [openSessionUid, setOpenSessionUid] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -246,6 +262,53 @@ export function ObservabilityView(): React.ReactElement {
         </section>
       )}
 
+      {data.sessions && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Chat sessions — every tenant, soft-deleted included</h2>
+          <Card className="overflow-hidden hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>session (first question)</TableHead>
+                  <TableHead>tenant</TableHead>
+                  <TableHead>caller id</TableHead>
+                  <TableHead className="text-right">turns</TableHead>
+                  <TableHead className="text-right">spend</TableHead>
+                  <TableHead>last activity (utc)</TableHead>
+                  <TableHead>state</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.sessions.map((sess) => (
+                  <TableRow key={sess.uid} className="cursor-pointer" onClick={() => setOpenSessionUid(sess.uid)}>
+                    <TableCell className="max-w-64 truncate font-medium">{sess.title}</TableCell>
+                    <TableCell>{sess.tenantName}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{sess.externalId.slice(0, 18)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{sess.turns}</TableCell>
+                    <TableCell className="text-right tabular-nums">{usd(sess.spendUsd)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{sess.updatedAt.slice(11, 19)}</TableCell>
+                    <TableCell>{sess.deletedAt ? <Badge variant="secondary">deleted (soft)</Badge> : <Badge variant="success">active</Badge>}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+          <div className="grid gap-3 md:hidden">
+            {data.sessions.map((sess) => (
+              <button key={sess.uid} onClick={() => setOpenSessionUid(sess.uid)} className="rounded-xl border p-3 text-left">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate font-medium">{sess.title}</p>
+                  {sess.deletedAt ? <Badge variant="secondary">deleted</Badge> : <Badge variant="success">active</Badge>}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {sess.tenantName} · {sess.turns} turns · {usd(sess.spendUsd)}
+                </p>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section>
         <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Routing decisions (latest 25, all tenants)</h2>
         <Card className="overflow-hidden">
@@ -288,7 +351,63 @@ export function ObservabilityView(): React.ReactElement {
       </section>
 
       <TraceDialog trace={openTrace} plan={openTrace ? data.decisions.find((d) => d.requestId === openTrace.id)?.plan ?? null : null} onClose={() => setOpenTrace(null)} />
+      <SessionDialog uid={openSessionUid} onClose={() => setOpenSessionUid(null)} />
     </div>
+  );
+}
+
+/** Session timeline (Langfuse session view): turns in order, full trace on each. */
+function SessionDialog({ uid, onClose }: { uid: number | null; onClose: () => void }): React.ReactElement {
+  const [timeline, setTimeline] = useState<{ title: string; turns: Turn[] } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setTimeline(null);
+    if (uid === null) return;
+    fetchSessionTimeline(uid, true).then((t) => {
+      if (!alive || !t) return;
+      setTimeline({ title: t.session.title, turns: t.turns });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [uid]);
+
+  return (
+    <Dialog open={uid !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{timeline ? timeline.title : "session"}</DialogTitle>
+        </DialogHeader>
+        {timeline === null ? (
+          <p className="text-sm text-muted-foreground">loading…</p>
+        ) : (
+          <div className="max-h-[70vh] space-y-3 overflow-y-auto">
+            {timeline.turns.map((t) => (
+              <div key={t.id} className="rounded-lg border p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-[10px] text-muted-foreground">{t.createdAt.slice(11, 19)} UTC</span>
+                  <Badge variant={outcomeBadge(t.outcome)}>{t.outcome}</Badge>
+                  {t.intent && <Badge variant="success">{t.intent}</Badge>}
+                  <Badge variant="outline" className="font-mono text-[10px]">{t.backendId} · {t.modelId.split("/").pop()}</Badge>
+                  <Badge variant="secondary" className="text-[10px]">{t.keyLabel ?? "—"}</Badge>
+                  <span className="ml-auto text-[10px] text-muted-foreground">{usd(t.costUsd)} · {t.latencyMs} ms</span>
+                </div>
+                <div className="space-y-2">
+                  <Bubble role="user">{t.question ?? "(not recorded)"}</Bubble>
+                  {t.answer ? <Bubble role="assistant">{t.answer}</Bubble> : t.error ? <Bubble role="assistant" tone="error">{t.error}</Bubble> : null}
+                </div>
+                {t.retrieval && t.retrieval.length > 0 && (
+                  <p className="mt-2 truncate text-[10px] text-muted-foreground">
+                    retrieved: {t.retrieval.map((e) => e.intent).join(", ")} · confidence {t.retrievalConfidence?.toFixed(2)}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -324,7 +443,7 @@ function TraceDialog({ trace, plan, onClose }: { trace: ActivityRow | null; plan
               ) : trace.error ? (
                 <Bubble role="assistant" tone="error">{trace.error}</Bubble>
               ) : (
-                <Bubble role="assistant" tone="muted">(no answer recorded — refused or failed before generation)</Bubble>
+                <Bubble role="assistant" tone="warning">(no answer recorded — refused or failed before generation)</Bubble>
               )}
             </div>
 
@@ -373,25 +492,5 @@ function TraceDialog({ trace, plan, onClose }: { trace: ActivityRow | null; plan
         )}
       </DialogContent>
     </Dialog>
-  );
-}
-
-function Bubble({ role, tone, children }: { role: "user" | "assistant"; tone?: "error" | "muted"; children: React.ReactNode }): React.ReactElement {
-  return (
-    <div className={role === "user" ? "flex justify-end" : "flex justify-start"}>
-      <div
-        className={
-          role === "user"
-            ? "max-w-[80%] rounded-xl rounded-br-sm bg-primary px-3.5 py-2.5 text-sm text-primary-foreground"
-            : tone === "error"
-              ? "max-w-[80%] rounded-xl rounded-bl-sm border border-destructive/40 bg-destructive/5 px-3.5 py-2.5 text-sm text-destructive"
-              : tone === "muted"
-                ? "max-w-[80%] rounded-xl rounded-bl-sm border px-3.5 py-2.5 text-sm text-muted-foreground"
-                : "max-w-[80%] whitespace-pre-wrap rounded-xl rounded-bl-sm border px-3.5 py-2.5 text-sm"
-        }
-      >
-        {children}
-      </div>
-    </div>
   );
 }

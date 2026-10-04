@@ -1,11 +1,12 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { db } from "../db/index.js";
-import { apiKeys, requests, routingDecisions, tenants } from "../db/schema.js";
+import { apiKeys, chatSessions, requests, routingDecisions, tenants } from "../db/schema.js";
 import { config } from "../config.js";
-import { errors } from "../lib/errors.js";
+import { errorBody, errors } from "../lib/errors.js";
 import { readUsage, utcDay } from "../lib/quota.js";
 import { authenticateUser, generateApiKey } from "../lib/password.js";
+import { listSessions, sessionTurns, softDeleteSession } from "../lib/chatSessions.js";
 import {
   clearSessionCookie, consoleAuth, createSession, destroySession, setSessionCookie,
   type ConsoleUser,
@@ -203,6 +204,24 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     return { ...summary, keyUsage: await keyUsage(tenantId) };
   });
 
+  /** Chat sessions (Langfuse-style grouping) — own tenant. */
+  app.get("/v1/console/chat-sessions", { onRequest: consoleRoute }, async (req) => {
+    return { sessions: await listSessions(reqUser(req).tenant.id, { includeDeleted: true }) };
+  });
+
+  app.delete<{ Params: { uid: number } }>("/v1/console/chat-sessions/:uid", { onRequest: consoleRoute }, async (req, reply) => {
+    const ok = await softDeleteSession(reqUser(req).tenant.id, Number(req.params.uid));
+    reply.status(ok ? 200 : 404);
+    return ok ? { ok: true } : errorBody("not_found", "session not found");
+  });
+
+  /** Session timeline: the session's turns with full traces (own tenant). */
+  app.get<{ Params: { uid: number } }>("/v1/console/chat-sessions/:uid", { onRequest: consoleRoute }, async (req) => {
+    const turns = await sessionTurns(Number(req.params.uid), reqUser(req).tenant.id);
+    if (!turns) throw errors.forbidden("no such session for this tenant");
+    return turns;
+  });
+
   /** Admin-only: cross-tenant usage + the routing decision log. */
   app.get("/v1/console/observability", { onRequest: consoleRoute }, async (req) => {
     if (reqUser(req).role !== "admin") throw errors.forbidden("Observability is admin-only.");
@@ -264,7 +283,31 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
         })),
       );
 
-    return { tenants: tenantsSummary, keys: fleetKeys, activity, decisions };
+    // All sessions across tenants (deleted included — an ops surface shows history).
+    const allSessions = await db
+      .select({
+        uid: chatSessions.uid,
+        tenantName: tenants.name,
+        externalId: chatSessions.externalId,
+        title: chatSessions.title,
+        createdAt: chatSessions.createdAt,
+        updatedAt: chatSessions.updatedAt,
+        deletedAt: chatSessions.deletedAt,
+        turns: sql<number>`(SELECT count(*) FROM requests WHERE requests.chat_session_uid = ${chatSessions.uid})`,
+        spendUsd: sql<number>`(SELECT coalesce(sum(estimated_cost_usd), 0) FROM requests WHERE requests.chat_session_uid = ${chatSessions.uid})`,
+      })
+      .from(chatSessions)
+      .innerJoin(tenants, eq(tenants.id, chatSessions.tenantId))
+      .orderBy(desc(chatSessions.updatedAt))
+      .limit(100);
+
+    return { tenants: tenantsSummary, keys: fleetKeys, activity, sessions: allSessions, decisions };
+  });
+
+  /** Admin: any session's timeline (cross-tenant). */
+  app.get<{ Params: { uid: number } }>("/v1/console/observability/sessions/:uid", { onRequest: consoleRoute }, async (req) => {
+    if (reqUser(req).role !== "admin") throw errors.forbidden("Observability is admin-only.");
+    return sessionTurns(Number(req.params.uid)); // cross-tenant: role already verified
   });
 }
 
