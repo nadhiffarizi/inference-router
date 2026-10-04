@@ -229,3 +229,141 @@ Tier 2 exists for the recorded walkthrough where cuts can hide the restart;
 tier 1 is what an assessor runs independently. The full case coverage lives
 in `RULES.md` (routing), `FLOW.md` (request path + failure shapes) and
 `EVALUATION.md` (measured), so nothing in the narrowed set stands alone.
+
+## 9. The assessment criteria, mapped
+
+The brief grades five things. This is where each is claimed — and where an
+assessor should look to check the claim.
+
+| criterion | how this system satisfies it | evidence |
+|---|---|---|
+| **Correctness of the request path** — auth, quota, streaming, failure behaviour | Bearer auth is a SHA-256 lookup with one key = one tenant, no key = 401; quota is fail-closed **twice** (over limit → 429, check itself failing → 503 `quota_uncertain` rather than serving blind); streaming everywhere (SSE) with fallback bounded by first byte; every failure path returns a machine-readable `{error:{code,message,details}}` with the right status — and no path hangs (per-chunk router timeout) | §8.1 tables A/B; `plugins/auth.ts`, `lib/quota.ts`, `routing/dispatch.ts`, `lib/errors.ts`; §5 |
+| **Routing and fallback** — reasoned rather than arbitrary, observable | Three cheap signals (complexity shape, retrieval confidence, capability), first-match-wins, each input a measured trade-off: tier B costs 11.6× tier A for +0.73 groundedness (§4), retrieval separates on/off-KB classes (§3); weak-retrieval band, refusal floor, and the two debug overrides (`backendPin`, `ROUTING_CHAIN`) are scoped and stated. Observable: every decision row is persisted and rendered — plan, action, reason per candidate | §2, §4; `docs/RULES.md`; `routing_decisions` table + console decision log |
+| **Measurement** — tokens, latency, cost recorded accurately; quality with numbers | One metering row per turn: prompt/completion tokens (provider-reported when OpenRouter supplies usage, estimate fallback, `costSource` distinguishes), e2e latency *and* TTFT, USD cost — the same currency the quota enforces; quality measured, not asserted: 87% intent accuracy, LLM-judge groundedness 3.37 (A) vs 4.10 (B), latency p95, cost per 30 cases | §4 table; `lib/metering.ts`; `docs/EVALUATION.md` |
+| **Code structure and exception handling** — invalid input, timeouts, bad model output | Adapters are the single provider seam (a swap is a new adapter, not a rewrite); policy stays in one readable rule file; invalid input is schema-rejected (`additionalProperties: false` → 400, and unknown `backendPin` → 400 with allowed ids); timeouts enforced at two layers (adapter abort + router per-chunk guard) after a real bug proved the adapter's alone wasn't enough; bad model output (empty/<15 chars) converts to a designed refusal rather than a served garbage answer; upstream failures walk the plan then 502 with the full plan | §5, §6; `routing/rules.ts` header, `backends/types.ts`, §8.2 dropped-rows rationale |
+| **Judgement** — what was built, what was skipped, and whether it was said so | Every scope growth has a named decision (D11–D15), every cut is listed as *still cut* (§6), every known limitation is stated plainly (§7), and the demo itself was narrowed explicitly with per-row reasons for what is not demoed (§8.2) — including the two triggers that don't exist today (mid-stream fault, unusable output) | §6–§8; `docs/DECISIONS.md`; this report's §3 iterated-with-measurement framing |
+
+## 10. Live demo runbook — payload + curl per chosen case
+
+Setup (Postman equivalent: set collection variables `baseUrl`, `apiKey`):
+
+```bash
+# 1) base + key — the assessor uses their own issued key (console → API Keys)
+BASE=https://router.kreasiodigital.com          # or http://127.0.0.1:4000
+KEY=sk_…your_key
+AUTH="Authorization: Bearer $KEY"
+CT="Content-Type: application/json"
+# fixture for the quota case only (3 req/day seed tenant)
+STRESS=sk_stress_key_0000000000000000
+```
+
+Reading the responses: streaming routes answer with SSE — the first
+`event: meta` carries `backend`, `fallbackTriggered` and the full
+`routingPlan` (the pills an assessor needs); `event: final` carries metering
+and quota. Non-stream failures (401/400/429/502) come back as plain JSON.
+
+### 10.1 Tier 1 — assessor-replayable (Postman/curl only)
+
+```bash
+## A1 — chat, simple question → tier A
+curl -sN "$BASE/v1/chat" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"what is your refund window?"}'
+#   meta.routingPlan[0].reason  = "chat: simple question", backend openrouter-tier-a
+
+## A2 — chat, complex question → tier B
+curl -sN "$BASE/v1/chat" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"Explain why a gateway uses fallback, compare two failure modes, and list the detailed steps an operator follows when the policy also fails."}'
+#   reason "chat: complex question", backend openrouter-tier-b
+
+## A3 — assistant, strong retrieval + simple → tier A (conf ≈ 0.80)
+curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"how do I cancel my order?"}'
+#   meta.retrieval.confidence ≈ 0.80 (strong); plan [tierA, tierB]
+
+## A4 — assistant, weak band [0.48, 0.55) → tier B (conf ≈ 0.50)
+curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"can I sell items on the marketplace?"}'
+#   meta.retrieval.confidence ≈ 0.50; reason "…, weak); tier B first
+
+## A5 — backendPin: pinned tier B first, tier A fallback behind it
+curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"how do I cancel my order?","backendPin":"openrouter-tier-b"}'
+#   plan[0].backendId = openrouter-tier-b, reason "pinned by request (eval A/B): …"
+
+## A6 — unknown backendPin → 400 (validated, never silently ignored)
+curl -s "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"how do I cancel my order?","backendPin":"ghost"}'
+#   {"error":{"code":"invalid_input","details":{"allowed":[…]}}}  — HTTP 400
+
+## B1 — policy refusal: conf < 0.48, no model call, cost 0
+curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"is the moon made of cheese?"}'
+#   meta: refusal true, backend "none"; final: refused true + reasoning;
+#   request slot consumed (bumpQuota(id, 0))
+
+## B2 — complex shape + low conf → refused before routing, tier B never reached
+curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"explain why dragons hoard gold, using multiple reasoning steps"}'
+#   ~4 hint words → complex shape; conf ≈ 0.17 (measured) < 0.48
+#   meta: refusal true, plan [{backendId:"none", action:"blocked_policy"}]
+
+## B5 — quota: the 3-requests/day fixture tenant; fire until the 429
+for i in 1 2 3 4 5; do
+  curl -s -o /dev/null -w "request $i → HTTP %{http_code}\n" \
+    "$BASE/v1/support-assistant" -X POST \
+    -H "Authorization: Bearer $STRESS" -H "$CT" \
+    -d '{"message":"how do I track my package?"}'
+done
+#   the request that crosses the limit → 429 quota_exceeded with
+#   {limit, used, reset:"UTC midnight"}; counters are UTC-daily, so the exact
+#   step at which it lands depends on today's use of the fixture key — a fresh
+#   midnight gives exactly 3 × 200 then 429 on the 4th.
+
+## B6 — auth fails closed: unknown key, and no header at all (same shape)
+curl -s "$BASE/v1/support-assistant" -X POST \
+  -H "Authorization: Bearer sk_not_a_real_key_at_all" -H "$CT" -d '{"message":"hi"}'
+#   HTTP 401 {"error":{"code":"unauthorized","message":"Unknown API key."}}
+curl -s "$BASE/v1/support-assistant" -X POST -H "$CT" -d '{"message":"hi"}'
+#   HTTP 401 — missing header, identical body shape
+
+## B7 — validation: >4000 chars, and an unknown field (schema is strict)
+curl -s "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d "{\"message\":\"$(printf 'x%.0s' $(seq 1 4001))\"}"
+#   HTTP 400 invalid_input (length violation)
+curl -s "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"hi","unexpectedField":true}'
+#   HTTP 400 invalid_input (additionalProperties: false)
+
+## B3 — unusable output: EXPLAINED, NOT DEMOED (no on-demand trigger — see §8.2)
+```
+
+Verify the trail afterwards: **Observability** (admin) or **Usage → routing
+decisions** shows each fired request as a decision row — the plan, actions and
+reasons must match what the response just streamed.
+
+### 10.2 Tier 2 — operator scenes (env change → restart → fire → revert)
+
+```bash
+## A7 + B4 — fallback: mock first, scripted stall → router timeout → tier A
+#   in docker-compose.yml environment add:
+#     ROUTING_CHAIN: "mock,openrouter-tier-a"
+#     MOCK_FAILURE_MODE: "hang"          # or "fail" for the hard-error variant
+docker compose up -d
+curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"how do I cancel my order?"}'
+#   meta.routingPlan = [mock failed "…timeout", openrouter-tier-a served],
+#   fallbackTriggered: true
+#   → then remove both lines and: docker compose up -d
+
+## B8 — upstream outage: both real tiers unreachable → 502, never a hang
+#   temporarily set: OPENROUTER_BASE_URL=http://127.0.0.1:9
+docker compose up -d
+curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"how do I cancel my order?"}'
+#   502 {"error":{"code":"backend_unavailable",…,"details":{"plan":[both failed]}}}
+#   → revert the base URL and: docker compose up -d
+```
+
+The same requests also run from the console **Playground** for the visual
+rendering (meta → delta → final with the routing X-ray); this runbook's value
+is that the assessor can drive every tier-1 case without any console at all.
