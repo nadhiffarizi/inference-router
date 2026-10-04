@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect } from "react";
 import { BarChart3, Eye, KeyRound, MessageSquareText, Network, LogOut } from "lucide-react";
+import { navigate, usePath } from "./router";
 import { AuthProvider, useAuth } from "./auth";
 import { LoginView } from "./login";
 import { Playground } from "./playground";
@@ -21,11 +22,14 @@ import { cn, usd } from "./lib/utils";
 
 type Tab = "playground" | "keys" | "usage" | "observability";
 
-const NAV: { id: Tab; label: string; icon: typeof BarChart3; role: "all" | "admin"; title: string; subtitle: string }[] = [
-  { id: "playground", label: "Playground", icon: MessageSquareText, role: "all", title: "Playground", subtitle: "support assistant, live through the gateway" },
-  { id: "keys", label: "API Keys", icon: KeyRound, role: "all", title: "API Keys", subtitle: "issue, copy, and the endpoints to integrate against" },
-  { id: "usage", label: "Usage", icon: BarChart3, role: "all", title: "Usage", subtitle: "requests, spend, quota remaining — own tenant" },
-  { id: "observability", label: "Observability", icon: Eye, role: "admin", title: "Observability", subtitle: "all tenants + routing decision log" },
+const NAV: {
+  id: Tab; path: string; label: string; icon: typeof BarChart3; role: "all" | "admin";
+  title: string; subtitle: string;
+}[] = [
+  { id: "playground", path: "/playground", label: "Playground", icon: MessageSquareText, role: "all", title: "Playground", subtitle: "support assistant, live through the gateway" },
+  { id: "keys", path: "/keys", label: "API Keys", icon: KeyRound, role: "all", title: "API Keys", subtitle: "issue, copy, and the endpoints to integrate against" },
+  { id: "usage", path: "/usage", label: "Usage", icon: BarChart3, role: "all", title: "Usage", subtitle: "requests, spend, quota remaining — own tenant" },
+  { id: "observability", path: "/observability", label: "Observability", icon: Eye, role: "admin", title: "Observability", subtitle: "all tenants + routing decision log" },
 ];
 
 export function App(): React.ReactElement {
@@ -38,7 +42,17 @@ export function App(): React.ReactElement {
 
 function Gate(): React.ReactElement {
   const { me, loading, logout } = useAuth();
-  const [tab, setTab] = useState<Tab>("playground");
+  const path = usePath();
+
+  // Role-scoped menu; the active tab is the URL, so refresh/deep links work.
+  const menus = NAV.filter((n) => n.role === "all" || (me?.user.role === "admin"));
+  const current = menus.find((n) => n.path === path) ?? menus[0]!;
+  const activeTab = current.id;
+
+  // Unknown or role-gated path → snap to the first permitted menu.
+  useEffect(() => {
+    if (me && window.location.pathname !== current.path) navigate(current.path, true);
+  }, [me, current.path]);
 
   if (loading) {
     return <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">loading…</div>;
@@ -46,11 +60,6 @@ function Gate(): React.ReactElement {
   if (!me) {
     return <LoginView onLoggedIn={() => window.location.reload()} />;
   }
-
-  const role = me.user.role;
-  const menus = NAV.filter((n) => n.role === "all" || role === "admin");
-  const current = menus.find((n) => n.id === tab) ?? menus[0]!;
-  const activeTab = current.id;
 
   return (
     <SidebarProvider>
@@ -71,7 +80,7 @@ function Gate(): React.ReactElement {
                 icon={n.icon}
                 label={n.label}
                 active={activeTab === n.id}
-                onClick={() => setTab(n.id)}
+                onClick={() => navigate(n.path)}
               />
             ))}
           </SidebarContent>
@@ -83,7 +92,7 @@ function Gate(): React.ReactElement {
             <div className="rounded-lg border p-2.5">
               <p className="truncate text-xs font-medium">{me.user.email}</p>
               <div className="mt-1 flex items-center justify-between gap-2">
-                <Badge variant={role === "admin" ? "info" : "secondary"}>{role === "admin" ? "admin" : "product team"}</Badge>
+                <Badge variant={me.user.role === "admin" ? "info" : "secondary"}>{me.user.role === "admin" ? "admin" : "product team"}</Badge>
                 <span className="font-mono text-[10px] text-muted-foreground">{me.user.tenant.name}</span>
               </div>
             </div>
@@ -126,7 +135,7 @@ function Gate(): React.ReactElement {
             return (
               <button
                 key={n.id}
-                onClick={() => setTab(n.id)}
+                onClick={() => navigate(n.path)}
                 className={cn(
                   "flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1.5 text-[11px] font-medium",
                   active ? "text-primary" : "text-muted-foreground",
