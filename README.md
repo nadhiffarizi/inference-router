@@ -11,6 +11,7 @@ Built for the Mekari "Mini Inference Router" take-home. Read in this order:
 
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — choices made **before** the code, with rejected alternatives
 - [`docs/RULES.md`](docs/RULES.md) — the routing rules, their thresholds, and why each is defensible
+- [`docs/FLOW.md`](docs/FLOW.md) — one request, end to end: gates, routing, fallback, settle-up
 - [`docs/REPORT.md`](docs/REPORT.md) — measured numbers, trade-offs, and what was cut
 - [`docs/EVALUATION.md`](docs/EVALUATION.md) — the A/B eval table (30 held-out cases)
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — self-hosted deployment runbook
