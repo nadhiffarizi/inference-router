@@ -59,18 +59,6 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
           type: "meta",
           data: { requestId, refusal: true, reason: "low_retrieval_confidence", retrieval: { entries, confidence } },
         });
-        writeEvent(reply, {
-          type: "final",
-          data: {
-            refused: true,
-            message:
-              "I don't have reliable information on that in the support knowledge base, so I won't guess. Could you rephrase, or contact support directly?",
-            reasoning: `retrieval confidence ${confidence.toFixed(2)} < floor ${config.assistant.refuseBelowConfidence}`,
-            retrieval: { entries, confidence },
-            intent: intentResult,
-            metering: { model: "none", tokens: { prompt: 0, completion: 0 }, latencyMs: Date.now() - started, estimatedCostUsd: 0, costSource: "n/a" },
-          },
-        });
         await recordRoutingDecision({
           requestId, tenantId: tenant.id, capability: "support-assistant",
           plan: [{ backendId: "none", action: "blocked_policy", reason: `retrieval confidence ${confidence.toFixed(2)} below refusal floor` }],
@@ -86,6 +74,21 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
         // A refusal is still a served request — it consumes a request slot,
         // zero tokens (no model was called).
         await bumpQuota(tenant.id, 0).catch(() => undefined);
+        // recorded before `final` ships — the console reloads the session
+        // timeline the instant it sees `final`, and a not-yet-persisted turn
+        // reads back as an empty timeline, wiping the chat (see chat.ts order).
+        writeEvent(reply, {
+          type: "final",
+          data: {
+            refused: true,
+            message:
+              "I don't have reliable information on that in the support knowledge base, so I won't guess. Could you rephrase, or contact support directly?",
+            reasoning: `retrieval confidence ${confidence.toFixed(2)} < floor ${config.assistant.refuseBelowConfidence}`,
+            retrieval: { entries, confidence },
+            intent: intentResult,
+            metering: { model: "none", tokens: { prompt: 0, completion: 0 }, latencyMs: Date.now() - started, estimatedCostUsd: 0, costSource: "n/a" },
+          },
+        });
         closeSse(reply);
         return;
       }
@@ -168,6 +171,21 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
       const latencyMs = Date.now() - started;
       const costUsd = usage.costUsd ?? estimateCost(outcome.chosen.meta.pricePerMTokens, usage);
 
+      // recorded before `final` ships — see the refusal branch above for why.
+      await recordRequest({
+        tenantId: tenant.id, capability: "support-assistant", ...reqKey(req), backendId: outcome.chosen.meta.id,
+        modelId: outcome.chosen.meta.modelId, promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
+        outcome: unusable ? "refused" : streamError ? "failed" : "ok",
+        error: streamError, retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
+        question: req.body.message, answer: unusable ? "" : answer, retrievalJson: JSON.stringify(entries),
+        chatSessionUid: chatSession?.uid,
+      }, requestId);
+      if (!unusable) {
+        await bumpQuota(tenant.id, usage.promptTokens + usage.completionTokens).catch((err) =>
+          console.error({ msg: "quota bump failed", requestId, err: String(err) }));
+      }
+
       if (unusable) {
         writeEvent(reply, {
           type: "final",
@@ -200,20 +218,6 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
             ok: !streamError,
           },
         });
-      }
-
-      await recordRequest({
-        tenantId: tenant.id, capability: "support-assistant", ...reqKey(req), backendId: outcome.chosen.meta.id,
-        modelId: outcome.chosen.meta.modelId, promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
-        outcome: unusable ? "refused" : streamError ? "failed" : "ok",
-        error: streamError, retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
-        question: req.body.message, answer: unusable ? "" : answer, retrievalJson: JSON.stringify(entries),
-        chatSessionUid: chatSession?.uid,
-      }, requestId);
-      if (!unusable) {
-        await bumpQuota(tenant.id, usage.promptTokens + usage.completionTokens).catch((err) =>
-          console.error({ msg: "quota bump failed", requestId, err: String(err) }));
       }
       closeSse(reply);
     },

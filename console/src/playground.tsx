@@ -151,15 +151,18 @@ function SessionChat({
 
   const loadTurns = useCallback(async (externalId: string) => {
     turnsReqRef.current = externalId;
-    const row = (await fetchChatSessions().catch(() => null))?.find((s) => s.externalId === externalId);
+    const list = await fetchChatSessions().catch(() => null);
     if (turnsReqRef.current !== externalId) return; // a newer session took over mid-flight
+    if (!list) return; // transient fetch failure — leave the visible transcript alone
+    const row = list.find((s) => s.externalId === externalId);
     if (!row) {
-      setExchanges([]);
+      setExchanges([]); // this session genuinely has no history yet
       return;
     }
     const timeline = await fetchSessionTimeline(row.uid);
     if (turnsReqRef.current !== externalId) return; // same, across the second await
-    setExchanges(timeline ? timeline.turns.map((turn) => ({ kind: "turn" as const, turn })) : []);
+    if (!timeline) return; // transient fetch failure — leave the visible transcript alone
+    setExchanges(timeline.turns.map((turn) => ({ kind: "turn" as const, turn })));
   }, []);
 
   useEffect(() => {
