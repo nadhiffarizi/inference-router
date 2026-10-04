@@ -21,6 +21,13 @@ function row(label: string, a: string, b: string, betterOn: "A" | "B" | "—" = 
   return `| ${label} | ${a} | ${b} | ${betterOn} |`;
 }
 
+/** Better on this metric: higher-is-better → cmp "gt", lower-is-better → "lt". Ties are ties. */
+function betterOn(a: number, b: number, cmp: "gt" | "lt"): "A" | "B" | "—" {
+  if (a === b) return "—";
+  const aWins = cmp === "gt" ? a > b : a < b;
+  return aWins ? "A" : "B";
+}
+
 export function buildTable(a: RunSummary, b: RunSummary): string {
   const lines = [
     "## A/B comparison — 30 held-out Bitext cases through the gateway",
@@ -29,14 +36,24 @@ export function buildTable(a: RunSummary, b: RunSummary): string {
     "",
     "| metric | A | B | better |",
     "|---|---|---|---|",
-    row("intent accuracy", fmtPct(a.metrics.intentAccuracy), fmtPct(b.metrics.intentAccuracy), (a.metrics.intentAccuracy >= b.metrics.intentAccuracy ? "A" : "B")),
+    row("intent accuracy", fmtPct(a.metrics.intentAccuracy), fmtPct(b.metrics.intentAccuracy), betterOn(a.metrics.intentAccuracy, b.metrics.intentAccuracy, "gt")),
     row("refusal rate", fmtPct(a.metrics.refusalRate), fmtPct(b.metrics.refusalRate)),
-    row("error rate", fmtPct(a.metrics.errorRate), fmtPct(b.metrics.errorRate), (a.metrics.errorRate <= b.metrics.errorRate ? "A" : "B")),
-    row("avg latency (ms)", fmt(a.metrics.avgLatencyMs), fmt(b.metrics.avgLatencyMs), (a.metrics.avgLatencyMs <= b.metrics.avgLatencyMs ? "A" : "B")),
-    row("p95 latency (ms)", fmt(a.metrics.p95LatencyMs), fmt(b.metrics.p95LatencyMs), (a.metrics.p95LatencyMs <= b.metrics.p95LatencyMs ? "A" : "B")),
-    row("total cost (USD)", fmt(a.metrics.totalCostUsd, 5), fmt(b.metrics.totalCostUsd, 5), (a.metrics.totalCostUsd <= b.metrics.totalCostUsd ? "A" : "B")),
-    row("avg groundedness (1–5)", a.metrics.avgGroundedness == null ? "n/a" : fmt(a.metrics.avgGroundedness, 2), b.metrics.avgGroundedness == null ? "n/a" : fmt(b.metrics.avgGroundedness, 2), a.metrics.avgGroundedness == null || b.metrics.avgGroundedness == null ? "—" : a.metrics.avgGroundedness >= b.metrics.avgGroundedness ? "A" : "B"),
+    row("error rate", fmtPct(a.metrics.errorRate), fmtPct(b.metrics.errorRate), betterOn(a.metrics.errorRate, b.metrics.errorRate, "lt")),
+    row("avg latency (ms)", fmt(a.metrics.avgLatencyMs), fmt(b.metrics.avgLatencyMs), betterOn(a.metrics.avgLatencyMs, b.metrics.avgLatencyMs, "lt")),
+    row("p95 latency (ms)", fmt(a.metrics.p95LatencyMs), fmt(b.metrics.p95LatencyMs), betterOn(a.metrics.p95LatencyMs, b.metrics.p95LatencyMs, "lt")),
+    row("total cost (USD)", fmt(a.metrics.totalCostUsd, 5), fmt(b.metrics.totalCostUsd, 5), betterOn(a.metrics.totalCostUsd, b.metrics.totalCostUsd, "lt")),
   ];
+
+  const gA = a.metrics.avgGroundedness;
+  const gB = b.metrics.avgGroundedness;
+  lines.push(
+    row(
+      "avg groundedness (1–5)",
+      gA == null ? "n/a" : fmt(gA, 2),
+      gB == null ? "n/a" : fmt(gB, 2),
+      gA == null || gB == null ? "—" : betterOn(gA, gB, "gt"),
+    ),
+  );
   return lines.join("\n") + "\n";
 }
 

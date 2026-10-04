@@ -4,9 +4,9 @@ Config A = openrouter-tier-a pinned · Config B = openrouter-tier-b pinned · ru
 
 | metric | A | B | better |
 |---|---|---|---|
-| intent accuracy | 87% | 87% | A |
+| intent accuracy | 87% | 87% | — |
 | refusal rate | 0% | 0% | — |
-| error rate | 0% | 0% | A |
+| error rate | 0% | 0% | — |
 | avg latency (ms) | 506 | 1569 | A |
 | p95 latency (ms) | 757 | 2132 | A |
 | total cost (USD) | 0.00383 | 0.04449 | A |
