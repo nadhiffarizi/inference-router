@@ -26,7 +26,8 @@ export type StreamMeta = {
   fallbackTriggered?: boolean;
   routingPlan?: PlanStep[];
   retrieval?: { entries: RetrievedEntry[]; confidence: number };
-  intent?: { intent: string | null; confidence: number };
+  /** confidence is null when rebuilt from a stored turn (intent confidence isn't persisted). */
+  intent?: { intent: string | null; confidence: number | null };
   refusal?: boolean;
   reason?: string;
 };
@@ -160,12 +161,17 @@ export type Turn = {
   backendId: string;
   modelId: string;
   tokens: number;
+  promptTokens: number;
+  completionTokens: number;
   costUsd: number;
   latencyMs: number;
   outcome: string;
+  /** Routing replay — populated from routing_decisions for every stored turn. */
+  plan: PlanStep[];
+  fallbackTriggered: boolean;
   question: string | null;
   answer: string | null;
-  retrieval: { id: number; question: string; answer: string; intent: string }[] | null;
+  retrieval: RetrievedEntry[] | null;
   retrievalConfidence: number | null;
   intent: string | null;
   error: string | null;

@@ -95,6 +95,8 @@ export async function sessionTurns(
     backendId: string;
     modelId: string;
     tokens: number;
+    promptTokens: number;
+    completionTokens: number;
     costUsd: number;
     latencyMs: number;
     outcome: string;
@@ -154,6 +156,8 @@ export async function sessionTurns(
       backendId: r.backendId,
       modelId: r.modelId,
       tokens: r.promptTokens + r.completionTokens,
+      promptTokens: r.promptTokens,
+      completionTokens: r.completionTokens,
       costUsd: r.estimatedCostUsd,
       latencyMs: r.latencyMs,
       outcome: r.outcome,

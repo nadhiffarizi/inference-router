@@ -118,6 +118,38 @@ type Exchange =
   | { kind: "live"; meta: StreamMeta | null; final: StreamFinal | null; text: string; fault: Fault | null }
   | { kind: "turn"; turn: Turn };
 
+/**
+ * X-ray state rebuilt from a stored turn's trace (routing_decisions + the
+ * request row) so re-entering a session replays its last turn's X-ray
+ * instead of resetting to "waiting…". Not everything survives: intent
+ * confidence isn't persisted, and quota is a live daily snapshot — those stay
+ * unknown/null on restore.
+ */
+type RestoredXray = { meta: StreamMeta | null; final: StreamFinal | null; fault: Fault | null };
+
+function restoredXray(t: Turn): RestoredXray {
+  return {
+    meta: {
+      requestId: t.id,
+      backend: { id: t.backendId, label: t.backendId, model: t.modelId },
+      fallbackTriggered: t.fallbackTriggered,
+      routingPlan: t.plan,
+      retrieval: t.retrieval ? { entries: t.retrieval, confidence: t.retrievalConfidence ?? 0 } : undefined,
+      intent: { intent: t.intent, confidence: null },
+    },
+    final: t.outcome === "ok" ? {
+      metering: {
+        model: t.modelId,
+        tokens: { prompt: t.promptTokens, completion: t.completionTokens },
+        latencyMs: t.latencyMs,
+        estimatedCostUsd: t.costUsd,
+        costSource: "", // not persisted per turn
+      },
+    } : null,
+    fault: t.outcome === "failed" || t.outcome === "quota_denied" ? { code: t.outcome, message: t.error ?? t.outcome } : null,
+  };
+}
+
 function SessionChat({
   apiKey, capability, onCapability,
 }: { apiKey: string; capability: Capability; onCapability: (c: Capability) => void }): React.ReactElement {
@@ -129,6 +161,8 @@ function SessionChat({
   const [meta, setMeta] = useState<StreamMeta | null>(null);
   const [final, setFinal] = useState<StreamFinal | null>(null);
   const [fault, setFault] = useState<Fault | null>(null);
+  /** X-ray replayed from the session's last stored turn (live state wins once a stream runs). */
+  const [restored, setRestored] = useState<RestoredXray | null>(null);
   const [streamText, setStreamText] = useState("");
   /** true between the stream's final event and that turn landing in the timeline — the window the live bubble must bridge alone. */
   const [pendingFinal, setPendingFinal] = useState(false);
@@ -163,6 +197,9 @@ function SessionChat({
     if (turnsReqRef.current !== externalId) return; // same, across the second await
     if (!timeline) return; // transient fetch failure — leave the visible transcript alone
     setExchanges(timeline.turns.map((turn) => ({ kind: "turn" as const, turn })));
+    // X-ray replays the session's last turn; an empty session resets to "waiting…"
+    const last = timeline.turns[timeline.turns.length - 1];
+    setRestored(last ? restoredXray(last) : null);
   }, []);
 
   useEffect(() => {
@@ -184,6 +221,7 @@ function SessionChat({
   async function newSession(): Promise<void> {
     setActiveExt(crypto.randomUUID());
     setMeta(null);
+    setRestored(null);
     setFinal(null);
     setFault(null);
     setStreamText("");
@@ -203,6 +241,7 @@ function SessionChat({
     setInput(""); // clear immediately — the message lives in the stream now
     setBusy(true);
     setFault(null);
+    setRestored(null); // a fresh exchange resets the X-ray (same as meta/final below)
     setMeta(null);
     setFinal(null);
     setStreamText("");
@@ -415,13 +454,13 @@ function SessionChat({
 
         {/* X-ray under the chat on lg–2xl, sized to its content (no blank tail) */}
         <div className="hidden min-w-0 flex-col gap-4 lg:flex 2xl:hidden lg:mt-5 lg:max-h-[45svh] lg:shrink-0 lg:overflow-y-auto lg:border-t lg:border-border lg:pt-5">
-          <Xray meta={meta} final={final} fault={fault} capability={capability} />
+          <Xray meta={meta ?? restored?.meta ?? null} final={final ?? restored?.final ?? null} fault={fault ?? restored?.fault ?? null} capability={capability} />
         </div>
       </section>
 
       {/* X-ray as its own right column on 2xl, divider on its left */}
       <aside className="hidden min-w-0 shrink-0 flex-col gap-4 overflow-y-auto 2xl:flex 2xl:h-full 2xl:w-[340px] 2xl:border-l 2xl:border-border 2xl:pl-5">
-        <Xray meta={meta} final={final} fault={fault} capability={capability} />
+        <Xray meta={meta ?? restored?.meta ?? null} final={final ?? restored?.final ?? null} fault={fault ?? restored?.fault ?? null} capability={capability} />
       </aside>
 
       <TraceDialog trace={openTrace} onClose={() => setOpenTrace(null)} />
@@ -499,7 +538,9 @@ export function Xray({ meta, final, fault, capability = "assistant" }: { meta: S
                 <span className={cn("text-lg font-semibold", !meta.intent.intent && "text-muted-foreground")}>
                   {meta.intent.intent ?? "none"}
                 </span>
-                <p className="text-xs text-muted-foreground">confidence {meta.intent.confidence.toFixed(2)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {meta.intent.confidence === null ? "confidence — not stored" : `confidence ${meta.intent.confidence.toFixed(2)}`}
+                </p>
               </div>
             ) : <p className="text-sm text-muted-foreground">waiting…</p>}
           </CardContent>
