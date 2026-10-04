@@ -10,8 +10,8 @@ building — each growth stated with its reason (D11–D15).
 | deliverable | value |
 |---|---|
 | **GitHub repository** (source + all documentation) | <https://github.com/nadhiffarizi/inference-router> — docs live in [`docs/`](.): this report, [`DECISIONS.md`](DECISIONS.md) (decisions argued before code), [`RULES.md`](RULES.md) (routing rationale), [`FLOW.md`](FLOW.md) (request path + failure shapes), [`EVALUATION.md`](EVALUATION.md) (measured A/B), [`DEPLOY.md`](DEPLOY.md) (runbook), [`demo.postman_collection.json`](demo.postman_collection.json) (the §8/§10 case set, importable) |
-| **Video demo** | _TODO: paste the recording URL here before submission_ |
-| **Deployed URL** | <https://router.kreasiodigital.com> — health: [`/v1/health`](https://router.kreasiodigital.com/v1/health) (`{"status":"ok"}`); console login: `team@demo.local` / `mekari-demo-2026` (product team view) or `admin@demo.local` / `mekari-demo-2026` (adds cross-tenant Observability). Self-hosted: Docker + NGINX + Cloudflare TLS per [`DEPLOY.md`](DEPLOY.md) |
+| **Deployed URL** | <https://router.kreasiodigital.com> — health: [`/v1/health`](https://router.kreasiodigital.com/v1/health) (`{"status":"ok"}`); self-hosted: Docker + NGINX + Cloudflare TLS per [`DEPLOY.md`](DEPLOY.md) |
+| **Console credentials** | The login page lists the two account emails only (no passwords shown in the app). Passwords, documented here only: `team@demo.local` / `mekari-demo-2026` (product team view) · `admin@demo.local` / `mekari-demo-2026` (adds cross-tenant Observability) |
 
 Where the report's required content lives:
 

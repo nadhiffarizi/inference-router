@@ -62,11 +62,9 @@ export function LoginView({ onLoggedIn }: { onLoggedIn: () => void }): React.Rea
             </Button>
           </form>
           <p className="mt-4 text-xs text-muted-foreground">
-            Demo accounts (shared for this assessment):<br />
+            Demo accounts (credentials in the report's docs):<br />
             <code>team@demo.local</code> — product team view<br />
             <code>admin@demo.local</code> — product view <span className="font-medium">+ observability</span>
-            <br />
-            password: <code className="font-mono">mekari-demo-2026</code>
           </p>
         </CardContent>
       </Card>
