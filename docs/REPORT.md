@@ -5,6 +5,25 @@ written **before** any code; this report records what was measured afterwards,
 where the numbers changed my mind, and where scope grew deliberately while
 building — each growth stated with its reason (D11–D15).
 
+## 0. Deliverables
+
+| deliverable | value |
+|---|---|
+| **GitHub repository** (source + all documentation) | <https://github.com/nadhiffarizi/inference-router> — docs live in [`docs/`](.): this report, [`DECISIONS.md`](DECISIONS.md) (decisions argued before code), [`RULES.md`](RULES.md) (routing rationale), [`FLOW.md`](FLOW.md) (request path + failure shapes), [`EVALUATION.md`](EVALUATION.md) (measured A/B), [`DEPLOY.md`](DEPLOY.md) (runbook), [`demo.postman_collection.json`](demo.postman_collection.json) (the §8/§10 case set, importable) |
+| **Video demo** | _TODO: paste the recording URL here before submission_ |
+| **Deployed URL** | <https://router.kreasiodigital.com> — health: [`/v1/health`](https://router.kreasiodigital.com/v1/health) (`{"status":"ok"}`); console login: `team@demo.local` / `mekari-demo-2026` (product team view) or `admin@demo.local` / `mekari-demo-2026` (adds cross-tenant Observability). Self-hosted: Docker + NGINX + Cloudflare TLS per [`DEPLOY.md`](DEPLOY.md) |
+
+Where the report's required content lives:
+
+| required by the brief | section |
+|---|---|
+| routing rules | §2 (rules + measured trade-offs), full rationale in [`RULES.md`](RULES.md) |
+| model choices | §2 (tier table with measured latency/cost), adapter seam in §1/§5, decision D4 |
+| retrieval choices | §3 (lexical by design, floor calibrated from probe data), decision D7 |
+| how it was evaluated | §4 (30 held-out cases through the real request path, LLM-judged), per-case detail in [`EVALUATION.md`](EVALUATION.md) |
+| trade-offs accepted | §4 (the 11.6×-cost read line), §6 (cut vs deliberately grown), §7 (limitations, said plainly), §8.2 (what the demo set drops and why) |
+| how to verify it live | §10 (payload-level runbook, every tier-1 case fired live) |
+
 ## 1. What was built
 
 One system, three pieces:
@@ -245,7 +264,10 @@ assessor should look to check the claim.
 
 ## 10. Live demo runbook — payload + curl per chosen case
 
-Setup (Postman equivalent: set collection variables `baseUrl`, `apiKey`):
+Setup (Postman equivalent: import
+[`demo.postman_collection.json`](demo.postman_collection.json) and set the
+collection variables `baseUrl`, `apiKey` — the fixture key for the quota case
+is pre-filled):
 
 ```bash
 # 1) base + key — the assessor uses their own issued key (console → API Keys)
