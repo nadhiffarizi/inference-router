@@ -36,11 +36,17 @@ export const sessions = sqliteTable("sessions", {
   createdAt: text("created_at").notNull(),
 });
 
-/** Keys stored as SHA-256 hex — plaintext never touches the DB; masked copy for display. */
+/**
+ * Keys: SHA-256 hex for auth lookups, plus the plaintext kept so the console
+ * can redisplay/copy it after issuance (demo scope — the key is a permanent
+ * identity artifact, not a rotating credential). Masked copy for lists.
+ */
 export const apiKeys = sqliteTable("api_keys", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   tenantId: integer("tenant_id").notNull(),
   keyHash: text("key_hash").notNull().unique(),
+  /** Plaintext, kept so the keys screen can copy it again; null for legacy rows. */
+  keyPlain: text("key_plain"),
   maskedKey: text("masked_key").notNull().default(""),
   label: text("label").notNull(),
   createdAt: text("created_at").notNull(),

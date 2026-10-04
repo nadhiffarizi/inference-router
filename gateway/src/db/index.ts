@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id INTEGER NOT NULL,
   key_hash TEXT NOT NULL UNIQUE,
+  key_plain TEXT,
   masked_key TEXT NOT NULL DEFAULT '',
   label TEXT NOT NULL,
   created_at TEXT NOT NULL
@@ -126,6 +127,7 @@ export function bootstrapDatabase(): void {
   for (const stmt of [
     "ALTER TABLE tenants ADD COLUMN budget_usd_per_day REAL NOT NULL DEFAULT 1.0",
     "ALTER TABLE api_keys ADD COLUMN masked_key TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE api_keys ADD COLUMN key_plain TEXT",
     "ALTER TABLE requests ADD COLUMN api_key_id INTEGER",
     "ALTER TABLE requests ADD COLUMN key_label TEXT",
     "ALTER TABLE requests ADD COLUMN question TEXT",

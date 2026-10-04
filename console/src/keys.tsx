@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, KeyRound } from "lucide-react";
+import { Copy, Eye, EyeOff, KeyRound } from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -10,11 +10,11 @@ import { Input } from "./components/ui/input";
 
 /**
  * API-keys screen — one account, one key, irreplaceable (openrouter-simple):
- * no key yet → issue via a named dialog; afterwards the mask is shown and
- * that's final (lost keys → reset demo fixtures).
+ * no key yet → issue via a named dialog; afterwards the key stays copyable
+ * from the card (the gateway keeps the plaintext for redisplay at demo scope).
  */
 
-export type KeyRow = { id: number; maskedKey: string; label: string; createdAt: string };
+export type KeyRow = { id: number; maskedKey: string; label: string; createdAt: string; key: string | null };
 export type Endpoints = { path: string; url: string; description: string }[];
 
 export function useKeys(): {
@@ -65,7 +65,8 @@ export function useKeys(): {
 
 export function ApiKeysView(): React.ReactElement {
   const { keys, endpoints, issue, error } = useKeys();
-  const [fresh, setFresh] = useState<string | null>(null); // plaintext shown once
+  const [fresh, setFresh] = useState<string | null>(null); // just-issued highlight
+  const [reveal, setReveal] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
@@ -101,7 +102,7 @@ export function ApiKeysView(): React.ReactElement {
         <CardContent>
           <p className="mb-4 text-sm text-muted-foreground">
             One account, one key — irreplaceable. It authenticates product flows and is tracked by name in
-            usage and observability. If the plaintext is lost, regenerate via fresh fixtures (demo scope).
+            usage and observability. You can reveal and copy it again anytime from the key card.
           </p>
 
           {active ? (
@@ -109,9 +110,28 @@ export function ApiKeysView(): React.ReactElement {
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{active.label}</p>
-                  <p className="font-mono text-xs text-muted-foreground">{active.maskedKey}</p>
+                  <p className="truncate font-mono text-xs text-muted-foreground">
+                    {active.key && reveal ? active.key : active.maskedKey}
+                  </p>
                 </div>
-                <Badge variant="success">active</Badge>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Badge variant="success">active</Badge>
+                  {active.key && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setReveal((r) => !r)}
+                        aria-label={reveal ? "hide key" : "reveal key"}
+                      >
+                        {reveal ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => void copy(active.key as string, "active")}>
+                        <Copy className="size-3" /> {copied === "active" ? "copied!" : "copy"}
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">issued {active.createdAt.slice(0, 10)}</p>
             </div>
@@ -155,7 +175,7 @@ export function ApiKeysView(): React.ReactElement {
           {fresh && (
             <div className="mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Copy now — shown once, never again</p>
+                <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Key created — copy it from here or the card above</p>
                 <Button size="sm" variant="outline" onClick={() => void copy(fresh, "fresh")}>
                   <Copy className="size-3" /> {copied === "fresh" ? "copied!" : "copy"}
                 </Button>

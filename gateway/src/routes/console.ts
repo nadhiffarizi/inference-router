@@ -158,7 +158,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
   app.get("/v1/console/keys", { onRequest: consoleRoute }, async (req) => {
     const user = reqUser(req);
     const rows = await db
-      .select({ id: apiKeys.id, maskedKey: apiKeys.maskedKey, label: apiKeys.label, createdAt: apiKeys.createdAt })
+      .select({ id: apiKeys.id, maskedKey: apiKeys.maskedKey, label: apiKeys.label, createdAt: apiKeys.createdAt, key: apiKeys.keyPlain })
       .from(apiKeys)
       .where(eq(apiKeys.tenantId, user.tenant.id))
       .orderBy(desc(apiKeys.id));
@@ -188,12 +188,12 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     await db.insert(apiKeys).values({
       tenantId: user.tenant.id,
       keyHash,
+      keyPlain: key,
       maskedKey: masked,
       label: req.body.label?.trim() || `key ${new Date().toISOString().slice(0, 10)}`,
       createdAt: new Date().toISOString(),
     });
     reply.status(201);
-    // Plaintext returned exactly once; nothing else in the system can show it again.
     return { apiKey: key, maskedKey: masked, endpoints: endpointList(req) };
   });
 

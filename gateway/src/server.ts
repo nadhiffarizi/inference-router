@@ -47,6 +47,7 @@ async function seedTenantsIfFresh(): Promise<void> {
     await db.insert(apiKeys).values({
       tenantId,
       keyHash: createHash("sha256").update(seed.key).digest("hex"),
+      keyPlain: seed.key,
       maskedKey: maskKey(seed.key),
       label: `default (${seed.name})`,
       createdAt: now,
