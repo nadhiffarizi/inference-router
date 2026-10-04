@@ -57,8 +57,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
         const latencyMs = Date.now() - started;
         const reason = `retrieval confidence ${confidence.toFixed(2)} below refusal floor`;
         const plan: PlanStep[] = [{ backendId: "none", action: "blocked_policy", reason }];
-        const message =
-          "I don't have reliable information on that in the support knowledge base, so I won't guess. Could you rephrase, or contact support directly?";
+        const message = config.assistant.lowRetrievalRefusalMessage;
         openSse(reply, requestId);
         // Same shape as a served turn's meta, with the refusal as the routing
         // outcome — the X-ray's routing pills come from here. Intent is NOT
@@ -194,7 +193,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
         completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
         outcome: unusable ? "refused" : streamError ? "failed" : "ok",
         error: streamError, retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
-        question: req.body.message, answer: unusable ? "" : answer, retrievalJson: JSON.stringify(entries),
+        question: req.body.message, answer: unusable ? config.assistant.unusableRefusalMessage : answer, retrievalJson: JSON.stringify(entries),
         chatSessionUid: chatSession?.uid,
       }, requestId);
       if (!unusable) {
@@ -207,7 +206,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
           type: "final",
           data: {
             refused: true,
-            message: "The model returned an unusable response, so I'm not answering it. Please try again.",
+            message: config.assistant.unusableRefusalMessage,
             reasoning: `model output length ${answer.trim().length} < 15 chars`,
             retrieval: { entries, confidence },
             intent: intentResult,

@@ -36,6 +36,12 @@ function req(name: string): string {
   return raw;
 }
 
+/** Optional string env — unset/empty falls back to the given default. */
+function str(name: string, fallback: string): string {
+  const raw = process.env[name]?.trim();
+  return raw || fallback;
+}
+
 const config_defaults = { requestQuota: 200 };
 
 export const config = {
@@ -104,6 +110,18 @@ export const config = {
     /** Below this normalized confidence the assistant refuses instead of guessing.
      *  Calibrated against probe data: on-KB ≈ 0.48–0.79, off-KB ≈ 0.04–0.37 (rag/kb.ts). */
     refuseBelowConfidence: num("RETRIEVAL_REFUSE_BELOW", 0.48),
+    /**
+     * Refusal copy — policy text, NOT model output (the model is never called
+     * when the gate refuses). One string per refusal path so the chat bubble,
+     * the stored turn's answer, and the trace replay all quote the same thing:
+     *   lowRetrieval — confidence under the floor, nothing worth grounding on;
+     *   unusable     — a model DID answer, but its output was unusable/empty,
+     *                  so the gateway served the policy refusal instead.
+     */
+    lowRetrievalRefusalMessage:
+      str("ASSISTANT_REFUSAL_MESSAGE",
+        "I don't have reliable information on that in the support knowledge base, so I won't guess. Could you rephrase, or contact support directly?"),
+    unusableRefusalMessage: str("ASSISTANT_UNUSABLE_MESSAGE", "The model returned an unusable response, so I'm not answering it. Please try again."),
   },
 
   /** Seed tenants are fixtures (DECISIONS.md D10 — no tenant CRUD UI).

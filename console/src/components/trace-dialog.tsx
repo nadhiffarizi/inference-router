@@ -3,6 +3,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "./ui/dialog";
 import { outcomeBadge } from "../lib/badges";
+import { NO_ANSWER_TEXT } from "../lib/copy";
 import { usd } from "../lib/utils";
 import { Bubble, Markdown } from "../lib/chatui";
 
@@ -67,7 +68,7 @@ export function TraceDialog({ trace, onClose }: { trace: TracePayload | null; on
               ) : trace.error ? (
                 <Bubble role="assistant" tone="error">{trace.error}</Bubble>
               ) : (
-                <Bubble role="assistant" tone="warning">(no answer recorded — refused or failed before generation)</Bubble>
+                <Bubble role="assistant" tone="warning">{NO_ANSWER_TEXT}</Bubble>
               )}
             </div>
 

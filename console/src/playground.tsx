@@ -9,6 +9,7 @@ import { Input, Textarea } from "./components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import { cn, usd } from "./lib/utils";
 import { outcomeBadge } from "./lib/badges";
+import { NO_ANSWER_TEXT } from "./lib/copy";
 import { Bubble, Markdown } from "./lib/chatui";
 import { TraceDialog, type TracePayload } from "./components/trace-dialog";
 
@@ -537,8 +538,9 @@ function TwoBubbles({ q, a, error, refused, live }: { q: string; a: string | nul
       {error ? (
         <Bubble role="assistant" tone="error">{error}</Bubble>
       ) : refused ? (
-        // pre-fix refusals persisted no text — never paint an empty bubble
-        <Bubble role="assistant" tone="warning">{a || "refused — the policy gate declined to answer this."}</Bubble>
+        // refusals persist their own message now; pre-persist refusals have
+        // none — show the shared missing-answer copy, never an empty bubble
+        <Bubble role="assistant" tone="warning">{a || NO_ANSWER_TEXT}</Bubble>
       ) : (
         <Bubble role="assistant" live={live}>
           <Markdown text={a ?? ""} />
