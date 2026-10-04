@@ -272,7 +272,7 @@ export function ObservabilityView(): React.ReactElement {
                 <TableRow>
                   <TableHead>session (first question)</TableHead>
                   <TableHead>tenant</TableHead>
-                  <TableHead>caller id</TableHead>
+                  <TableHead>session_id</TableHead>
                   <TableHead className="text-right">turns</TableHead>
                   <TableHead className="text-right">spend</TableHead>
                   <TableHead>last activity (utc)</TableHead>
