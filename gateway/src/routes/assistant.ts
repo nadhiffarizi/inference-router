@@ -165,9 +165,12 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
       let usage = { promptTokens: 0, completionTokens: 0, costUsd: undefined as number | undefined };
       let answer = "";
       let streamError: string | undefined;
+      /** TTFT is measured against the first delta the caller can see — see chat.ts. */
+      let ttftMs: number | undefined;
       try {
         for await (const ev of outcome.stream) {
           if (ev.type === "delta") {
+            if (ttftMs === undefined) ttftMs = Date.now() - started;
             writeEvent(reply, { type: "delta", data: { text: ev.text } });
             answer += ev.text;
           } else {
@@ -190,7 +193,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
       await recordRequest({
         tenantId: tenant.id, capability: "support-assistant", ...reqKey(req), backendId: outcome.chosen.meta.id,
         modelId: outcome.chosen.meta.modelId, promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
+        completionTokens: usage.completionTokens, latencyMs, ttftMs, estimatedCostUsd: costUsd,
         outcome: unusable ? "refused" : streamError ? "failed" : "ok",
         error: streamError, retrievedCount: entries.length, intent: intentResult.intent ?? undefined, confidence,
         question: req.body.message, answer: unusable ? config.assistant.unusableRefusalMessage : answer, retrievalJson: JSON.stringify(entries),
@@ -224,6 +227,7 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
               model: outcome.chosen.meta.modelId,
               tokens: { prompt: usage.promptTokens, completion: usage.completionTokens },
               latencyMs,
+              ttftMs,
               estimatedCostUsd: costUsd,
               costSource: usage.costUsd !== undefined ? "provider" : "estimate",
             },

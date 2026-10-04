@@ -131,6 +131,14 @@ function plainDecision(r: typeof routingDecisions.$inferSelect) {
   };
 }
 
+/** Nearest-rank percentile of a column, ascending — the value `q` of samples
+    land under. Empty inputs read as 0, which a chart never draws from anyway. */
+function percentile(values: number[], q: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * q) - 1))]!;
+}
+
 /** ---- admin log explorer: the see-all pages behind the top-K tables ----
     Same rows the summary surfaces render (top-K), read here with paging,
     search and filters so the ops pages can leave the K behind. */
@@ -184,6 +192,7 @@ function activityRow(
     tokens: r.promptTokens + r.completionTokens,
     costUsd: r.estimatedCostUsd,
     latencyMs: r.latencyMs,
+    ttftMs: r.ttftMs,
     outcome: r.outcome,
     question: r.question,
     answer: r.answer,
@@ -340,6 +349,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
           tokens: r.promptTokens + r.completionTokens,
           costUsd: r.estimatedCostUsd,
           latencyMs: r.latencyMs,
+          ttftMs: r.ttftMs,
           outcome: r.outcome,
           // trace payload for the chat-turn viewer:
           question: r.question,
@@ -676,6 +686,65 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
         or(like(requests.question, `%${q}%`), like(requests.id, `%${q}%`), like(requests.modelId, `%${q}%`), like(requests.keyLabel, `%${q}%`))!,
       );
     }
+
+    /** Tail latency + streaming shape: percentiles can't be summed, so per
+        bucket this ranks raw rows in JS — SQLite's percentile functions live
+        in optional extensions, and at metering-table scale the row scan is
+        cheaper than depending on one. A bucket with no qualifying rows reads
+        as `null` (a gap the line skips), never as 0 ms of latency. `total` is
+        the whole window's percentile, which is the number worth reading, not
+        a sum of buckets. */
+    if (metric === "latencyP95" || metric === "ttftP95" || metric === "tpotP95" || metric === "tpsP50") {
+      const raw = await db
+        .select({
+          bucket: sql<string>`substr(${requests.createdAt}, 1, ${bucketLen})`,
+          tenant: tenants.name,
+          latencyMs: requests.latencyMs,
+          ttftMs: requests.ttftMs,
+          completionTokens: requests.completionTokens,
+        })
+        .from(requests)
+        .innerJoin(tenants, eq(tenants.id, requests.tenantId))
+        .where(and(...conditions));
+
+      /** The sample this metric ranks, in the metric's unit. End-to-end ms,
+          first-token ms, decode ms per output token (TTFT excluded — that is
+          not decoding), or output tokens/s. Rows the metric can't judge (no
+          first token, no output tokens) drop out rather than faking a 0. */
+      const sample = (r: (typeof raw)[number]): number | null => {
+        const decodeMs = r.ttftMs === null ? null : r.latencyMs - r.ttftMs;
+        switch (metric) {
+          case "latencyP95": return r.latencyMs;
+          case "ttftP95":    return r.ttftMs;
+          case "tpotP95":    return decodeMs && r.completionTokens > 0 ? decodeMs / r.completionTokens : null;
+          case "tpsP50":     return decodeMs && r.completionTokens > 0 && decodeMs > 0
+            ? r.completionTokens / (decodeMs / 1000) : null;
+        }
+      };
+      const quantile = metric === "tpsP50" ? 0.5 : 0.95;
+
+      const perBucket = new Map<string, number[]>();
+      for (const r of raw) {
+        const v = sample(r);
+        if (v === null) continue;
+        const key = `${r.bucket}|${r.tenant}`;
+        const rows = perBucket.get(key) ?? [];
+        rows.push(v);
+        perBucket.set(key, rows);
+      }
+      const series = names.map((tenantName) => ({
+        tenant: tenantName,
+        values: buckets.map((b) => {
+          const rows = perBucket.get(`${b}|${tenantName}`);
+          return rows ? percentile(rows, quantile) : null;
+        }),
+      }));
+      return pack({
+        domain: "turns", metric, bucketKind: "time", buckets, series,
+        total: percentile(raw.map(sample).filter((v): v is number => v !== null), quantile),
+      });
+    }
+
     const value =
       metric === "tokens"      ? sql<number>`coalesce(sum(${requests.promptTokens} + ${requests.completionTokens}), 0)`
       : metric === "costUsd"   ? sql<number>`coalesce(sum(${requests.estimatedCostUsd}), 0)`
@@ -702,7 +771,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     }
     function pack(x: {
       domain: string; metric: string; bucketKind: "time" | "category";
-      buckets: string[]; series: { tenant: string; values: number[] }[]; total: number;
+      buckets: string[]; series: { tenant: string; values: (number | null)[] }[]; total: number;
     }) {
       return { ...x, window: domain === "keys" ? undefined : window };
     }

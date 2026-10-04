@@ -78,7 +78,7 @@ export function TraceContent({ trace }: { trace: TracePayload }): React.ReactEle
 
       {/* metering — pinned to the surface's bottom edge */}
       {(trace.tokens !== undefined || trace.costUsd !== undefined || trace.latencyMs !== undefined) && (
-        <div className="grid shrink-0 grid-cols-4 gap-2 rounded-lg border p-3">
+        <div className="grid shrink-0 grid-cols-5 gap-2 rounded-lg border p-3">
           <div>
             <p className="text-[10px] text-muted-foreground">tokens</p>
             <p className="font-mono text-sm font-semibold">{trace.tokens ?? 0}</p>
@@ -86,6 +86,10 @@ export function TraceContent({ trace }: { trace: TracePayload }): React.ReactEle
           <div>
             <p className="text-[10px] text-muted-foreground">cost</p>
             <p className="font-mono text-sm font-semibold">{usd(trace.costUsd ?? 0)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-muted-foreground">first token</p>
+            <p className="font-mono text-sm font-semibold">{trace.ttftMs ?? "—"}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground">latency</p>

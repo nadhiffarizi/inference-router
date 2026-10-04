@@ -25,7 +25,9 @@ export type SeriesData = {
   metric: string;
   bucketKind: "time" | "category";
   buckets: string[];
-  series: { tenant: string; values: number[] }[];
+  /** Latency metrics can emit null for a bucket with no qualifying rows
+      (counted metrics never do — the API zero-fills those). */
+  series: { tenant: string; values: (number | null)[] }[];
   total: number;
 };
 

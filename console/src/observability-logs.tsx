@@ -10,9 +10,11 @@ import {
 import { TraceSheet, SessionSheet } from "./components/trace-drawers";
 import type { TracePayload } from "./components/trace-dialog";
 import { LogChart } from "./components/usage-chart";
+import { StreamingLatencyCard } from "./components/latency-chart";
 import { RouteChain } from "./components/route-chain";
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
+import { localTime } from "./lib/time";
 
 /**
  * The "see all" pages behind /observability's top-K tables: same rows, minus
@@ -34,6 +36,7 @@ type ActivityRow = {
   tokens: number;
   costUsd: number;
   latencyMs: number;
+  ttftMs: number | null;
   outcome: string;
   question: string | null;
   answer: string | null;
@@ -104,6 +107,7 @@ export function ActivityLogPage(): React.ReactElement {
         ]}
         filters={{ q, tenant, outcome, capability }}
       />
+      <StreamingLatencyCard filters={{ q, tenant, outcome, capability }} />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={qInput} onChange={setQInput} placeholder="question, request id, model, key…" />
@@ -124,7 +128,7 @@ export function ActivityLogPage(): React.ReactElement {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>time (utc)</TableHead>
+                  <TableHead>time (local)</TableHead>
                   <TableHead>tenant</TableHead>
                   <TableHead>capability</TableHead>
                   <TableHead>key</TableHead>
@@ -132,13 +136,14 @@ export function ActivityLogPage(): React.ReactElement {
                   <TableHead>outcome</TableHead>
                   <TableHead className="text-right">tokens</TableHead>
                   <TableHead className="text-right">cost</TableHead>
+                  <TableHead className="text-right">ttft</TableHead>
                   <TableHead className="text-right">latency</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(data?.rows ?? []).map((r) => (
                   <TableRow key={r.id} className="cursor-pointer" onClick={() => setOpenTrace(r)}>
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{r.createdAt.slice(11, 19)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(r.createdAt)}</TableCell>
                     <TableCell>{r.tenant}</TableCell>
                     <TableCell>
                       <Badge variant={r.capability === "support-assistant" ? "info" : "secondary"}>
@@ -150,10 +155,11 @@ export function ActivityLogPage(): React.ReactElement {
                     <TableCell><Badge variant={outcomeBadge(r.outcome)}>{r.outcome}</Badge></TableCell>
                     <TableCell className="text-right tabular-nums">{r.tokens}</TableCell>
                     <TableCell className="text-right tabular-nums">{usd(r.costUsd)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.ttftMs !== null ? `${r.ttftMs} ms` : "—"}</TableCell>
                     <TableCell className="text-right tabular-nums">{r.latencyMs} ms</TableCell>
                   </TableRow>
                 ))}
-                {data?.rows.length === 0 && <EmptyRow cols={9} />}
+                {data?.rows.length === 0 && <EmptyRow cols={10} />}
               </TableBody>
             </Table>
           </Card>
@@ -162,12 +168,12 @@ export function ActivityLogPage(): React.ReactElement {
             {(data?.rows ?? []).map((r) => (
               <button key={r.id} onClick={() => setOpenTrace(r)} className="rounded-xl border p-4 text-left">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs text-muted-foreground">{r.createdAt.slice(11, 19)}</span>
+                  <span className="font-mono text-xs text-muted-foreground">{localTime(r.createdAt)}</span>
                   <Badge variant={outcomeBadge(r.outcome)}>{r.outcome}</Badge>
                 </div>
                 <p className="mt-1 truncate text-sm">{r.question ?? "(no trace)"}</p>
                 <p className="text-xs text-muted-foreground">
-                  {r.tenant} · {r.modelId} · {usd(r.costUsd)} · {r.latencyMs} ms
+                  {r.tenant} · {r.modelId} · {usd(r.costUsd)} · ttft {r.ttftMs ?? "—"} ms · {r.latencyMs} ms
                 </p>
               </button>
             ))}
@@ -229,7 +235,7 @@ export function SessionsLogPage(): React.ReactElement {
                   <TableHead>session_id</TableHead>
                   <TableHead className="text-right">turns</TableHead>
                   <TableHead className="text-right">spend</TableHead>
-                  <TableHead>last activity (utc)</TableHead>
+                  <TableHead>last activity (local)</TableHead>
                   <TableHead>state</TableHead>
                 </TableRow>
               </TableHeader>
@@ -241,7 +247,7 @@ export function SessionsLogPage(): React.ReactElement {
                     <TableCell className="font-mono text-xs text-muted-foreground">{sess.externalId.slice(0, 18)}</TableCell>
                     <TableCell className="text-right tabular-nums">{sess.turns}</TableCell>
                     <TableCell className="text-right tabular-nums">{usd(sess.spendUsd)}</TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{sess.updatedAt.slice(11, 19)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(sess.updatedAt)}</TableCell>
                     <TableCell>{sess.deletedAt ? <Badge variant="secondary">deleted (soft)</Badge> : <Badge variant="success">active</Badge>}</TableCell>
                   </TableRow>
                 ))}
@@ -319,7 +325,7 @@ export function DecisionsLogPage(): React.ReactElement {
               <TableHeader>
                 <TableRow>
                   <TableHead>request</TableHead>
-                  <TableHead>time (utc)</TableHead>
+                  <TableHead>time (local)</TableHead>
                   <TableHead>tenant</TableHead>
                   <TableHead>capability</TableHead>
                   <TableHead>served by</TableHead>
@@ -331,7 +337,7 @@ export function DecisionsLogPage(): React.ReactElement {
                 {(data?.rows ?? []).map((d) => (
                   <TableRow key={d.requestId}>
                     <TableCell className="font-mono text-xs">{d.requestId.slice(0, 8)}</TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{d.createdAt.slice(11, 19)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(d.createdAt)}</TableCell>
                     <TableCell>{d.tenant}</TableCell>
                     <TableCell>
                       <Badge variant={d.capability === "support-assistant" ? "info" : "secondary"}>{d.capability}</Badge>

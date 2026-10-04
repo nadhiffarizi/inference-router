@@ -4,6 +4,7 @@ import { TraceContent } from "./trace-content";
 import { SessionContent } from "./session-content";
 import { fetchSessionTimeline, type Turn } from "../api";
 import type { TracePayload } from "./trace-dialog";
+import { localStamp } from "../lib/time";
 
 /**
  * The right-drawer surfaces for the see-all log pages: a row's detail slides
@@ -23,7 +24,7 @@ export function TraceSheet({ trace, onClose }: { trace: TracePayload | null; onC
         {trace && (
           <>
             <SheetHeader className="shrink-0">
-              <SheetTitle className="text-base">trace · {trace.createdAt.slice(0, 19).replace("T", " ")} UTC</SheetTitle>
+              <SheetTitle className="text-base">trace · {localStamp(trace.createdAt)}</SheetTitle>
               <SheetDescription className="hidden">{String(trace.id)}</SheetDescription>
             </SheetHeader>
             <TraceContent trace={trace} />

@@ -2,6 +2,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "./ui/dialog";
 import { TraceContent } from "./trace-content";
+import { localStamp } from "../lib/time";
 
 /**
  * The trace viewer as a centered dialog — how the playground and the
@@ -19,6 +20,8 @@ export type TracePayload = {
   tokens?: number;
   costUsd?: number;
   latencyMs?: number;
+  /** First token as the caller saw it, ms; null when none streamed. */
+  ttftMs?: number | null;
   outcome?: string;
   question?: string | null;
   answer?: string | null;
@@ -39,7 +42,7 @@ export function TraceDialog({ trace, onClose }: { trace: TracePayload | null; on
           <>
             {/* mb-0: the flex gap covers the header's spacing */}
             <DialogHeader className="mb-0 shrink-0">
-              <DialogTitle>trace · {trace.createdAt.slice(0, 19).replace("T", " ")} UTC</DialogTitle>
+              <DialogTitle>trace · {localStamp(trace.createdAt)}</DialogTitle>
             </DialogHeader>
 
             <TraceContent trace={trace} />

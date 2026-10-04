@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import {
   ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig,
 } from "./ui/chart";
 import { cn, usd } from "../lib/utils";
+import { bucketAxisLabel, bucketTooltipLabel, browserZone } from "../lib/time";
 import { useApiList, type SeriesData } from "./log-explorer";
 
 /**
@@ -20,7 +21,7 @@ import { useApiList, type SeriesData } from "./log-explorer";
  */
 
 /** Muted hues, matched to the badge accents; assigned per series in config order. */
-const PALETTE = [
+export const PALETTE = [
   "oklch(0.765 0.177 163.223)", // emerald-400
   "oklch(0.707 0.165 254.624)", // blue-400
   "oklch(0.702 0.183 293.541)", // violet-400
@@ -46,7 +47,11 @@ function StackedBars({ data, className }: { data: SeriesData; className?: string
   );
   // one row per bucket; a column per tenant, for recharts to stack
   const rows = data.buckets.map((b, i) => {
-    const row: Record<string, string | number> = { bucket: bucketLabel(b, data.bucketKind ?? "time") };
+    const row: Record<string, string | number> = {
+      bucket: bucketAxisLabel(b, data.bucketKind ?? "time"),
+      // the tooltip carries the full local instant — "Oct 4, 15:00", not a bare tick
+      bucketAt: bucketTooltipLabel(b, data.bucketKind ?? "time"),
+    };
     for (const t of data.series) row[t.tenant] = t.values[i] ?? 0;
     return row;
   });
@@ -66,7 +71,13 @@ function StackedBars({ data, className }: { data: SeriesData; className?: string
         />
         <YAxis tickLine={false} axisLine={false} width={48} tickFormatter={fmtY} />
         <ChartTooltip
-          content={<ChartTooltipContent labelFormatter={(label) => String(label)} />}
+          content={
+            <ChartTooltipContent
+              labelFormatter={(_, payload) =>
+                String((payload?.[0]?.payload as { bucketAt?: string } | undefined)?.bucketAt ?? "")
+              }
+            />
+          }
           cursor={{ fill: "var(--muted)", fillOpacity: 0.35 }}
         />
         <ChartLegend content={<ChartLegendContent />} />
@@ -99,7 +110,7 @@ export function UsageChart(): React.ReactElement {
         <div>
           <p className="text-sm font-semibold">usage over time</p>
           <p className="text-xs text-muted-foreground">
-            {METRIC_LABELS[metric] ?? metric} · stacked per tenant · utc
+            {METRIC_LABELS[metric] ?? metric} · stacked per tenant · {browserZone()}
             {data ? ` · ${chartTotal(data)} over the window` : ""}
           </p>
         </div>
@@ -175,7 +186,7 @@ export function LogChart({
 
 /** Shared toggles / states / formatters */
 
-function Toggle({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }): React.ReactElement {
+export function Toggle({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }): React.ReactElement {
   return (
     <Button
       variant={active ? "secondary" : "ghost"}
@@ -211,10 +222,4 @@ function metricFormat(metric: string): (v: number) => string {
     v >= 10_000 ? `${(v / 1000).toFixed(0)}k`
     : v >= 1000 ? `${(v / 1000).toFixed(1)}k`
     : String(Math.round(v));
-}
-
-/** Bucket keys sort as text; the display keeps only what the axis needs. */
-function bucketLabel(bucket: string, kind: "time" | "category"): string {
-  if (kind === "category") return bucket.slice(0, 18);
-  return bucket.length === 13 ? bucket.slice(11, 13) + ":00" : bucket.slice(5, 10);
 }

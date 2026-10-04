@@ -64,6 +64,11 @@ export const requests = sqliteTable("requests", {
   promptTokens: integer("prompt_tokens").notNull().default(0),
   completionTokens: integer("completion_tokens").notNull().default(0),
   latencyMs: integer("latency_ms").notNull().default(0),
+  /** First token as seen by the caller, ms from request start; null when no
+      token ever streamed (failed / refused / no backend). TTFT is the only
+      streaming metric that must be *measured* — tokens/s and ms-per-token
+      derive from it plus the token counts (see console.ts latency metrics). */
+  ttftMs: integer("ttft_ms"),
   estimatedCostUsd: real("estimated_cost_usd").notNull().default(0),
   /** ok | refused | failed | quota_denied */
   outcome: text("outcome").notNull(),

@@ -7,6 +7,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
+import { localDay } from "./lib/time";
 
 /**
  * API-keys screen — one account, one key, irreplaceable (openrouter-simple):
@@ -133,7 +134,7 @@ export function ApiKeysView(): React.ReactElement {
                   )}
                 </div>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">issued {active.createdAt.slice(0, 10)}</p>
+              <p className="mt-2 text-xs text-muted-foreground">issued {localDay(active.createdAt)}</p>
             </div>
           ) : (
             <Button size="sm" onClick={() => setDialogOpen(true)}>

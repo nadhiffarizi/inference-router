@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS requests (
   prompt_tokens INTEGER NOT NULL DEFAULT 0,
   completion_tokens INTEGER NOT NULL DEFAULT 0,
   latency_ms INTEGER NOT NULL DEFAULT 0,
+  ttft_ms INTEGER,
   estimated_cost_usd REAL NOT NULL DEFAULT 0,
   outcome TEXT NOT NULL,
   error TEXT,
@@ -134,6 +135,7 @@ export function bootstrapDatabase(): void {
     "ALTER TABLE requests ADD COLUMN answer TEXT",
     "ALTER TABLE requests ADD COLUMN retrieval_json TEXT",
     "ALTER TABLE requests ADD COLUMN chat_session_uid INTEGER",
+    "ALTER TABLE requests ADD COLUMN ttft_ms INTEGER",
   ]) {
     try {
       sqlite.exec(stmt);

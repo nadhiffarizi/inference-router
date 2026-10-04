@@ -195,7 +195,7 @@ event: meta   → requestId, chosen backend, fallbackTriggered, full routingPlan
                 (assistant: retrieval entries + confidence + detected intent)
 event: delta  → {text} … repeated, exactly what the model emitted
 event: error  → only on mid-stream fault or total failure
-event: final  → metering {model, tokens, latencyMs, estimatedCostUsd, costSource}
+event: final  → metering {model, tokens, latencyMs, ttftMs, estimatedCostUsd, costSource}
                 quota {used, limits}
                 (assistant: answer / refusal, retrieval, intent)
 ```
@@ -209,7 +209,8 @@ After the stream settles (`assistant.ts:164-218`):
    `answer.trim().length < 15` → convert to `refused: true` with the actual
    reason, meter it, **don't bump token quota**. Failed output consuming user
    quota is exactly the fail-closed principle from D-decisions.
-2. **Metering:** one `requests` row per turn — tokens, latency, cost, outcome
+2. **Metering:** one `requests` row per turn — tokens, latency, ttft (time to
+   first token, null when nothing streamed), cost, outcome
    (`ok | refused | failed`), backend/model, key name, and the full turn trace
    (question, answer, retrieval JSON) so observability can *replay* a turn, not
    just count it. Metering failures are logged loudly, never crash a served

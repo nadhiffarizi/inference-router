@@ -230,3 +230,51 @@ the eval measures single-turn quality and the gateway does not become a party
 to tenant conversation state. The defense: this is exactly Langfuse's model —
 sessions explain *who was talking to whom*, prompts describe *what the model
 received*.
+
+### D16 — UTC in storage and query, the viewer's clock at render
+
+Every timestamp column is ISO-8601 UTC (SQLite has no zone-less "now" you can
+trust on a server), and quota days stay UTC-midnight (D13). The console is a
+static bundle for whoever is looking at it, so the *render* converts: one
+`lib/time.ts` owns every format — `HH:MM:SS` columns, full stamps in trace
+titles, and series buckets read back into the viewer's local clock (`13:00Z`
+plots as `15:00` in Berlin) with the IANA zone named in each chart subtitle.
+Buckets still *align* to UTC hours/days; in a whole-hour-offset zone that is
+invisible, in a half-hour zone the ticks show the real offset (18:30, not
+19:00). Aligning buckets to local midnight would need the client to send its
+offset and the server to shift `substr` bucketing — not worth it until someone
+actually reads the daily chart across such a zone.
+
+### D17 — A p95 latency chart, target-line first
+
+Volume and spend charts cannot show what hurts, so /observability carries a
+second chart: p95 latency per bucket per tenant, lines (latency is a level —
+stacking percentiles is meaningless), plus a dashed **target line at 400 ms**,
+a starting SLO rather than a measurement: a bucket above the line reads as
+"one turn in twenty was slower than promised". p50 is hidden by averages and
+p99 is noise at demo row counts, so p95 is the honest tail. It is a constant
+in the client, not editable in the UI — a target only means something once it
+is per-capability (retrieval-augmented support turns are structurally slower
+than plain chat) and agreed with whoever owns the product. Percentiles are
+ranked in JS over the bucket's rows rather than a SQL window function:
+SQLite ships percentile support only as optional extensions.
+
+### D18 — Streaming shape: TTFT measured, TPOT and tokens/s derived
+
+The end-to-end p95 (D17) says a turn was slow, not *where* it was slow — a 2 s
+turn may be 100 ms of routing then 1.9 s of nothing, or 200 ms to first token
+and a slow generation after. So the gateway measures **TTFT** once, at the
+first delta the caller would see (`ttft_ms`, null when no token streamed —
+failures and policy refusals have none by definition), and the console derives
+the rest per row: **TPOT** = `(latency − ttft) / completion_tokens`, and
+**tokens/s** = its reciprocal. One measured column, no drift between metrics,
+and `/observability/activity` charts all three: ttft p95 (target **200 ms**),
+tpot p95 (target **200 ms/token**), throughput median (**floor 5 tok/s** — the
+same 200 ms/token restated, since a percentile of a rate that must stay *above*
+a floor is the wrong rank and p50 is the median generation speed). Targets are
+client constants until a target is agreed per capability (D17); 200 ms TTFT is
+a network+generation floor a fast provider can meet, not a gateway guarantee.
+
+Caveat kept honestly: TTFT measures from request start, so it includes session
+resolution, retrieval, and every failed fallback attempt — that is what the
+caller waited through, and the reason a fallback-heavy hour reads slow here.

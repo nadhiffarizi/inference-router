@@ -9,11 +9,13 @@ import {
 } from "./components/ui/table";
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
+import { localTime } from "./lib/time";
 import { Stat } from "./usage";
 import { type TracePayload } from "./components/trace-dialog";
 import { TraceDialog } from "./components/trace-dialog";
 import { SessionDialog } from "./components/session-dialog";
 import { UsageChart } from "./components/usage-chart";
+import { LatencyChart } from "./components/latency-chart";
 import { SectionHeader } from "./components/log-explorer";
 import { ActivityLogPage, DecisionsLogPage, KeysLogPage, SessionsLogPage } from "./observability-logs";
 import { linkProps, usePath } from "./router";
@@ -36,6 +38,7 @@ type ActivityRow = {
   tokens: number;
   costUsd: number;
   latencyMs: number;
+  ttftMs: number | null;
   outcome: string;
   question: string | null;
   answer: string | null;
@@ -137,6 +140,11 @@ function ObservabilityHome(): React.ReactElement {
         <UsageChart />
       </section>
 
+      {/* tail latency beside the volume picture — the SLO line makes a slow hour visible */}
+      <section>
+        <LatencyChart />
+      </section>
+
       <section>
         <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Tenants</h2>
         <Card className="overflow-hidden hidden md:block">
@@ -229,7 +237,7 @@ function ObservabilityHome(): React.ReactElement {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>time (utc)</TableHead>
+                  <TableHead>time (local)</TableHead>
                   <TableHead>tenant</TableHead>
                   <TableHead>capability</TableHead>
                   <TableHead>key</TableHead>
@@ -247,7 +255,7 @@ function ObservabilityHome(): React.ReactElement {
                     className="cursor-pointer"
                     onClick={() => setOpenTrace(r)}
                   >
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{r.createdAt.slice(11, 19)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(r.createdAt)}</TableCell>
                     <TableCell>{r.tenant}</TableCell>
                     <TableCell>
                       <Badge variant={r.capability === "support-assistant" ? "info" : "secondary"}>
@@ -271,7 +279,7 @@ function ObservabilityHome(): React.ReactElement {
             {data.activity.map((r) => (
               <button key={r.id} onClick={() => setOpenTrace(r)} className="rounded-xl border p-4 text-left">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs text-muted-foreground">{r.createdAt.slice(11, 19)}</span>
+                  <span className="font-mono text-xs text-muted-foreground">{localTime(r.createdAt)}</span>
                   <Badge variant={outcomeBadge(r.outcome)}>{r.outcome}</Badge>
                 </div>
                 <p className="mt-1 truncate text-sm">{r.question ?? "(no trace)"}</p>
@@ -296,7 +304,7 @@ function ObservabilityHome(): React.ReactElement {
                   <TableHead>session_id</TableHead>
                   <TableHead className="text-right">turns</TableHead>
                   <TableHead className="text-right">spend</TableHead>
-                  <TableHead>last activity (utc)</TableHead>
+                  <TableHead>last activity (local)</TableHead>
                   <TableHead>state</TableHead>
                 </TableRow>
               </TableHeader>
@@ -308,7 +316,7 @@ function ObservabilityHome(): React.ReactElement {
                     <TableCell className="font-mono text-xs text-muted-foreground">{sess.externalId.slice(0, 18)}</TableCell>
                     <TableCell className="text-right tabular-nums">{sess.turns}</TableCell>
                     <TableCell className="text-right tabular-nums">{usd(sess.spendUsd)}</TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{sess.updatedAt.slice(11, 19)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(sess.updatedAt)}</TableCell>
                     <TableCell>{sess.deletedAt ? <Badge variant="secondary">deleted (soft)</Badge> : <Badge variant="success">active</Badge>}</TableCell>
                   </TableRow>
                 ))}

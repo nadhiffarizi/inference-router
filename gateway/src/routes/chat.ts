@@ -90,9 +90,14 @@ export function registerChatRoute(
       let usage = { promptTokens: 0, completionTokens: 0, costUsd: undefined as number | undefined };
       let streamError: string | undefined;
       let answer = "";
+      /** TTFT is measured against the first delta the caller can see — the
+          request start includes session resolution, routing and any fallback
+          attempts, i.e. everything the caller waited through. */
+      let ttftMs: number | undefined;
       try {
         for await (const ev of outcome.stream) {
           if (ev.type === "delta") {
+            if (ttftMs === undefined) ttftMs = Date.now() - started;
             writeEvent(reply, { type: "delta", data: { text: ev.text } });
             answer += ev.text;
           } else usage = { promptTokens: ev.usage.promptTokens, completionTokens: ev.usage.completionTokens, costUsd: ev.usage.costUsd };
@@ -109,7 +114,7 @@ export function registerChatRoute(
       await recordRequest({
         tenantId: tenant.id, capability: "chat", ...reqKey(req), backendId: outcome.chosen.meta.id,
         modelId: outcome.chosen.meta.modelId, promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens, latencyMs, estimatedCostUsd: costUsd,
+        completionTokens: usage.completionTokens, latencyMs, ttftMs, estimatedCostUsd: costUsd,
         outcome: streamError ? "failed" : "ok", error: streamError,
         question: req.body.message, answer, chatSessionUid: chatSession?.uid, // turn trace (Langfuse-mini)
       }, requestId);
@@ -125,6 +130,7 @@ export function registerChatRoute(
             model: outcome.chosen.meta.modelId,
             tokens: { prompt: usage.promptTokens, completion: usage.completionTokens },
             latencyMs,
+            ttftMs,
             estimatedCostUsd: costUsd,
             costSource: priceExact ? "provider" : "estimate",
           },
