@@ -10,7 +10,7 @@ import {
 import { TraceSheet, SessionSheet } from "./components/trace-drawers";
 import type { TracePayload } from "./components/trace-dialog";
 import { LogChart } from "./components/usage-chart";
-import { StreamingLatencyCard } from "./components/latency-chart";
+import { LatencyChart } from "./components/latency-chart";
 import { RouteChain } from "./components/route-chain";
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
@@ -107,7 +107,7 @@ export function ActivityLogPage(): React.ReactElement {
         ]}
         filters={{ q, tenant, outcome, capability }}
       />
-      <StreamingLatencyCard filters={{ q, tenant, outcome, capability }} />
+      <LatencyChart filters={{ q, tenant, outcome, capability }} />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={qInput} onChange={setQInput} placeholder="question, request id, model, key…" />

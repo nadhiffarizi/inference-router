@@ -140,7 +140,8 @@ function ObservabilityHome(): React.ReactElement {
         <UsageChart />
       </section>
 
-      {/* tail latency beside the volume picture — the SLO line makes a slow hour visible */}
+      {/* tail latency beside the volume picture — TTFT is what callers feel;
+          end-to-end (and the decode metrics) sit one toggle away */}
       <section>
         <LatencyChart />
       </section>

@@ -19,6 +19,12 @@ import { PALETTE, Toggle } from "./usage-chart";
  * promised". They are constants, deliberately unedited in the UI until a
  * target is per-capability and agreed (retrieval-augmented support turns are
  * structurally slower than plain chat).
+ *
+ * TTFT is the default everywhere — it is what a chat caller *feels*, and the
+ * metric the 200 ms target describes. End-to-end stays one toggle away: a
+ * provider that streams fast then crawls reads great on TTFT and badly on
+ * end-to-end, and that is exactly what the decode metrics (on the activity
+ * page) and the round-trip toggle are for.
  */
 
 /** End-to-end SLO line (p95) — ms from request start, streaming included. */
@@ -39,28 +45,12 @@ const METRICS: Record<LatencyMetric, { title: string; targetAt: number; targetLa
   tpsP50: { title: "generation throughput — median over time", targetAt: TPS_FLOOR_TPS, targetLabel: `floor ${TPS_FLOOR_TPS} tok/s (= ${TPOT_TARGET_MS} ms/token)`, unit: "tok/s", unitSub: "tok/s median" },
 };
 
-/** The two surfaces: the home card keeps fleet-level SLO p95; the activity
-    page gets the streaming shape (TTFT / TPOT / throughput), filterable by
-    whatever the toolbar above its table is filtering on. */
+/** One card, both surfaces: the default metric is TTFT; end-to-end p95, TPOT
+    and throughput are toggles. The activity page passes its toolbar's filters
+    so the picture and the table under it agree. */
 
-export function LatencyChart(): React.ReactElement {
-  return <LatencyCard metric="latencyP95" />;
-}
-
-export function StreamingLatencyCard({ filters }: { filters: Record<string, string | number> }): React.ReactElement {
+export function LatencyChart({ filters = {} }: { filters?: Record<string, string | number> }): React.ReactElement {
   const [metric, setMetric] = useState<LatencyMetric>("ttftP95");
-  return <LatencyCard metric={metric} onMetric={setMetric} metrics={["ttftP95", "tpotP95", "tpsP50"]} filters={filters} />;
-}
-
-/** One chart body with a metric switch; the home card just never shows the switch. */
-function LatencyCard({
-  metric, onMetric, metrics, filters = {},
-}: {
-  metric: LatencyMetric;
-  onMetric?: (m: LatencyMetric) => void;
-  metrics?: LatencyMetric[];
-  filters?: Record<string, string | number>;
-}): React.ReactElement {
   const [span, setSpan] = useState("24h");
   const spec = METRICS[metric];
 
@@ -94,10 +84,10 @@ function LatencyCard({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {metrics?.map((m) => (
-            <Toggle key={m} active={metric === m} onClick={() => onMetric?.(m)}>{toggleLabel(m)}</Toggle>
+          {(Object.keys(METRICS) as LatencyMetric[]).map((m) => (
+            <Toggle key={m} active={metric === m} onClick={() => setMetric(m)}>{toggleLabel(m)}</Toggle>
           ))}
-          {metrics && <span className="mx-1 text-border">|</span>}
+          <span className="mx-1 text-border">|</span>
           <Toggle active={span === "24h"} onClick={() => setSpan("24h")}>24h hourly</Toggle>
           <Toggle active={span === "30d"} onClick={() => setSpan("30d")}>30 days daily</Toggle>
         </div>
@@ -158,7 +148,7 @@ function LatencyCard({
 }
 
 function toggleLabel(metric: LatencyMetric): string {
-  return { latencyP95: "p95", ttftP95: "ttft p95", tpotP95: "tpot p95", tpsP50: "tokens/s median" }[metric];
+  return { latencyP95: "round-trip p95", ttftP95: "ttft p95", tpotP95: "tpot p95", tpsP50: "tokens/s median" }[metric];
 }
 
 function fmtValue(v: number, metric: LatencyMetric): string {

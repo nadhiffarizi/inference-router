@@ -278,3 +278,16 @@ a network+generation floor a fast provider can meet, not a gateway guarantee.
 Caveat kept honestly: TTFT measures from request start, so it includes session
 resolution, retrieval, and every failed fallback attempt — that is what the
 caller waited through, and the reason a fallback-heavy hour reads slow here.
+
+### D19 — TTFT is the default latency chart; round-trip stays a toggle
+
+One latency card serves both surfaces (home and /observability/activity), with
+**TTFT p95 as the opened view**: it is what a chat caller *feels*, and what the
+200 ms target actually describes. End-to-end p95 keeps a toggle rather than
+being replaced: a provider that streams its first token fast and then crawls
+reads great on TTFT and badly end to end, and the round trip is the number the
+gateway's own timeouts, quota and budget semantics ride on. The decode pair
+(TPOT p95, tokens/s median) lives in the same toggle row, so the "where was it
+slow" question — connect, first token, or decoding — is answered without
+leaving one card. Targets stay client constants until agreed per capability
+(D17/D18).
