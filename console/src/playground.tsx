@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, KeyRound, MessageSquarePlus, Square, Sparkles, Trash2 } from "lucide-react";
+import { ArrowUp, KeyRound, MessageSquarePlus, MessageSquareText, Square, Sparkles, Trash2 } from "lucide-react";
 import { deleteChatSession, fetchChatSessions, fetchSessionTimeline, postStream, type ChatSessionRow, type StreamFinal, type StreamMeta, type Turn } from "./api";
 import { useKeys } from "./keys";
 import { Badge } from "./components/ui/badge";
@@ -271,15 +271,6 @@ function SessionChat({
       <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-start-1 xl:row-start-1">
         <Card>
           <CardContent className="p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">capability:</span>
-              <Button type="button" size="sm" variant={capability === "assistant" ? "default" : "outline"} className="rounded-full" onClick={() => onCapability("assistant")}>
-                support assistant
-              </Button>
-              <Button type="button" size="sm" variant={capability === "chat" ? "default" : "outline"} className="rounded-full" onClick={() => onCapability("chat")}>
-                plain chat
-              </Button>
-            </div>
             <form onSubmit={send}>
               <Textarea
                 value={input}
@@ -290,24 +281,43 @@ function SessionChat({
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send(e);
                 }}
               />
-              <div className="mt-3 flex items-center justify-between">
+              <div className="mt-3 flex items-center justify-between gap-2">
+                {/* capability mode picker, inside the composer (Gemini-style) */}
                 <div className="flex items-center gap-1">
-                  <Button type="button" variant="ghost" size="sm" onClick={onDisconnect} className="text-muted-foreground">
-                    disconnect key
+                  <Button
+                    type="button" size="sm" variant={capability === "assistant" ? "secondary" : "ghost"}
+                    className="h-7 rounded-full px-2.5 text-xs"
+                    onClick={() => onCapability("assistant")}
+                    title="grounded support assistant — retrieval, intent, refusal"
+                  >
+                    <Sparkles className="size-3" /> assistant
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => void newSession()} className="text-muted-foreground hidden sm:inline-flex">
-                    <MessageSquarePlus className="size-3.5" /> new
+                  <Button
+                    type="button" size="sm" variant={capability === "chat" ? "secondary" : "ghost"}
+                    className="h-7 rounded-full px-2.5 text-xs"
+                    onClick={() => onCapability("chat")}
+                    title="plain chat capability — no retrieval"
+                  >
+                    <MessageSquareText className="size-3" /> chat
                   </Button>
                 </div>
-                {busy ? (
-                  <Button type="button" variant="outline" size="sm" onClick={() => abortRef.current?.abort()}>
-                    <Square className="size-3.5" /> Stop
+                <div className="flex items-center gap-1">
+                  <Button type="button" variant="ghost" size="icon" onClick={onDisconnect} title="disconnect key" className="size-7 text-muted-foreground hidden sm:inline-flex">
+                    <KeyRound className="size-3.5" />
                   </Button>
-                ) : (
-                  <Button type="submit" size="sm" disabled={!input.trim()}>
-                    <ArrowUp className="size-3.5" /> Ask
+                  <Button type="button" variant="ghost" size="icon" onClick={() => void newSession()} title="new session" className="size-7 text-muted-foreground hidden sm:inline-flex">
+                    <MessageSquarePlus className="size-3.5" />
                   </Button>
-                )}
+                  {busy ? (
+                    <Button type="button" variant="outline" size="icon" onClick={() => abortRef.current?.abort()} title="stop" className="size-8">
+                      <Square className="size-3.5" />
+                    </Button>
+                  ) : (
+                    <Button type="submit" size="icon" disabled={!input.trim()} title="send" className="size-8 rounded-full">
+                      <ArrowUp className="size-3.5" />
+                    </Button>
+                  )}
+                </div>
               </div>
             </form>
           </CardContent>
