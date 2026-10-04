@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input, Textarea } from "./components/ui/input";
 import { cn, usd } from "./lib/utils";
 import { outcomeBadge } from "./lib/badges";
-import { Bubble } from "./lib/chatui";
+import { Bubble, Markdown } from "./lib/chatui";
 import { TraceDialog, type TracePayload } from "./components/trace-dialog";
 
 /**
@@ -471,10 +471,20 @@ function SessionChat({
 
 function TwoBubbles({ q, a, error, refused, live }: { q: string; a: string | null; error: string | null; refused?: boolean; live?: boolean }): React.ReactElement {
   return (
-    <>
+    // the user bubble is right-aligned, the assistant's spans wide — without
+    // this gap the user bubble's bottom corner sits flush on the answer's
+    <div className="space-y-2.5">
       <Bubble role="user">{q}</Bubble>
-      {error ? <Bubble role="assistant" tone="error">{error}</Bubble> : refused ? <Bubble role="assistant" tone="warning">{a}</Bubble> : <Bubble role="assistant" live={live}>{a}</Bubble>}
-    </>
+      {error ? (
+        <Bubble role="assistant" tone="error">{error}</Bubble>
+      ) : refused ? (
+        <Bubble role="assistant" tone="warning">{a}</Bubble>
+      ) : (
+        <Bubble role="assistant" live={live}>
+          <Markdown text={a ?? ""} />
+        </Bubble>
+      )}
+    </div>
   );
 }
 

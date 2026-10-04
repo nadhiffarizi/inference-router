@@ -12,7 +12,7 @@ import { usd } from "./lib/utils";
 import { Stat } from "./usage";
 import { fetchSessionTimeline, type Turn } from "./api";
 import { TraceDialog, type TracePayload } from "./components/trace-dialog";
-import { Bubble } from "./lib/chatui";
+import { Bubble, Markdown } from "./lib/chatui";
 
 /**
  * Admin-only cross-tenant view: usage for every tenant plus the routing
@@ -407,7 +407,7 @@ function SessionDialog({ uid, onClose }: { uid: number | null; onClose: () => vo
                 </div>
                 <div className="space-y-2">
                   <Bubble role="user">{t.question ?? "(not recorded)"}</Bubble>
-                  {t.answer ? <Bubble role="assistant">{t.answer}</Bubble> : t.error ? <Bubble role="assistant" tone="error">{t.error}</Bubble> : null}
+                  {t.answer ? <Bubble role="assistant"><Markdown text={t.answer} /></Bubble> : t.error ? <Bubble role="assistant" tone="error">{t.error}</Bubble> : null}
                 </div>
                 {t.retrieval && t.retrieval.length > 0 && (
                   <p className="mt-2 truncate text-[10px] text-muted-foreground">

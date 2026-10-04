@@ -4,7 +4,7 @@ import {
 } from "./ui/dialog";
 import { outcomeBadge } from "../lib/badges";
 import { usd } from "../lib/utils";
-import { Bubble } from "../lib/chatui";
+import { Bubble, Markdown } from "../lib/chatui";
 
 /**
  * The one trace view (Langfuse-mini, shared): the stored chat turn —
@@ -63,7 +63,7 @@ export function TraceDialog({ trace, onClose }: { trace: TracePayload | null; on
             <div className="space-y-3">
               <Bubble role="user">{trace.question ?? "(not recorded)"}</Bubble>
               {trace.answer != null && trace.answer.length > 0 ? (
-                <Bubble role="assistant">{trace.answer}</Bubble>
+                <Bubble role="assistant"><Markdown text={trace.answer} /></Bubble>
               ) : trace.error ? (
                 <Bubble role="assistant" tone="error">{trace.error}</Bubble>
               ) : (
