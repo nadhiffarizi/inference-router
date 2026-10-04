@@ -9,6 +9,7 @@ import { Input, Textarea } from "./components/ui/input";
 import { cn, usd } from "./lib/utils";
 import { outcomeBadge } from "./lib/badges";
 import { Bubble } from "./lib/chatui";
+import { TraceDialog, type TracePayload } from "./components/trace-dialog";
 
 /**
  * Playground: session rail (Langfuse-style grouping) + chat pane + X-ray.
@@ -126,6 +127,7 @@ function SessionChat({ apiKey, onDisconnect }: { apiKey: string; onDisconnect: (
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const [openTrace, setOpenTrace] = useState<TracePayload | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -249,7 +251,7 @@ function SessionChat({ apiKey, onDisconnect }: { apiKey: string; onDisconnect: (
       </div>
 
       {/* chat pane */}
-      <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-start-1 xl:row-start-1">
         <Card>
           <CardContent className="p-4">
             <form onSubmit={send}>
@@ -288,17 +290,53 @@ function SessionChat({ apiKey, onDisconnect }: { apiKey: string; onDisconnect: (
         <div className="flex flex-col gap-3">
           {exchanges.map((x, i) =>
             x.kind === "turn" ? (
-              <TwoBubbles key={i} q={x.turn.question ?? ""} a={x.turn.answer} error={x.turn.error} refused={x.turn.outcome === "refused"} />
+              <div key={i}>
+                <button
+                  className="w-full cursor-pointer text-start"
+                  title="view trace"
+                  onClick={() => setOpenTrace({ ...x.turn })}
+                >
+                  <TwoBubbles q={x.turn.question ?? ""} a={x.turn.answer} error={x.turn.error} refused={x.turn.outcome === "refused"} />
+                </button>
+              </div>
             ) : null,
           )}
           {showLiveExchange && (
-            <TwoBubbles
-              q={input}
-              a={final?.refused ? final.message ?? "" : (final?.answer ?? streamText) || null}
-              error={fault?.message ?? null}
-              refused={final?.refused === true}
-              live={busy && !streamText}
-            />
+            <button
+              className="w-full cursor-pointer text-start disabled:cursor-default"
+              title={busy ? undefined : "view trace"}
+              onClick={() =>
+                setOpenTrace({
+                  id: meta?.requestId ?? "-",
+                  createdAt: new Date().toISOString(),
+                  capability: "support-assistant",
+                  keyLabel: null,
+                  backendId: meta?.backend?.id ?? "none",
+                  modelId: meta?.backend?.model ?? "none",
+                  tokens: final?.metering ? final.metering.tokens.prompt + final.metering.tokens.completion : undefined,
+                  costUsd: final?.metering?.estimatedCostUsd,
+                  latencyMs: final?.metering?.latencyMs,
+                  outcome: fault ? "failed" : final?.refused ? "refused" : "ok",
+                  question: input,
+                  answer: fault ? null : final?.refused ? final.message ?? null : (final?.answer ?? streamText) || null,
+                  retrievalConfidence: meta?.retrieval?.confidence ?? null,
+                  retrieval: meta?.retrieval?.entries ?? null,
+                  intent: meta?.intent?.intent ?? null,
+                  error: fault?.message ?? null,
+                  plan: meta?.routingPlan ?? [],
+                  fallbackTriggered: meta?.fallbackTriggered,
+                })
+              }
+              disabled={busy}
+            >
+              <TwoBubbles
+                q={input}
+                a={final?.refused ? final.message ?? "" : (final?.answer ?? streamText) || null}
+                error={fault?.message ?? null}
+                refused={final?.refused === true}
+                live={busy && !streamText}
+              />
+            </button>
           )}
           {exchanges.length === 0 && !showLiveExchange && (
             <p className="py-8 text-center text-sm text-muted-foreground">start with one of these, or type your own</p>
@@ -315,10 +353,12 @@ function SessionChat({ apiKey, onDisconnect }: { apiKey: string; onDisconnect: (
         </div>
       </div>
 
-      {/* X-ray — live exchange only */}
-      <div className="hidden min-w-0 flex-col gap-4 xl:flex">
+      {/* X-ray: under the chat on lg, third column on xl */}
+      <div className="hidden min-w-0 flex-col gap-4 lg:flex lg:col-start-2 lg:row-start-2 xl:col-start-3 xl:row-start-1">
         <Xray meta={meta} final={final} fault={fault} />
       </div>
+
+      <TraceDialog trace={openTrace} onClose={() => setOpenTrace(null)} />
     </div>
   );
 }

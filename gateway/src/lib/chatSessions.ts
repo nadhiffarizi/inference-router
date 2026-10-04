@@ -1,6 +1,6 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { chatSessions, requests } from "../db/schema.js";
+import { chatSessions, requests, routingDecisions } from "../db/schema.js";
 
 /**
  * Session grouping (Langfuse logic, own implementation):
@@ -104,6 +104,8 @@ export async function sessionTurns(
     retrievalConfidence: number | null;
     intent: string | null;
     error: string | null;
+    plan: { backendId: string; action: string; reason: string }[];
+    fallbackTriggered: boolean;
   }[];
 } | null> {
   const session = await db
@@ -124,6 +126,24 @@ export async function sessionTurns(
     .where(eq(requests.chatSessionUid, uid))
     .orderBy(requests.createdAt);
 
+  // Routing plans per turn (join decisions by requestId) so historical turns
+  // are fully replayable — not just metered.
+  const decisions = turns.length
+    ? await db
+        .select({ requestId: routingDecisions.requestId, planJson: routingDecisions.planJson, fallbackTriggered: routingDecisions.fallbackTriggered })
+        .from(routingDecisions)
+        .where(inArray(routingDecisions.requestId, turns.map((t) => t.id)))
+    : [];
+  const planByRequest = new Map(
+    decisions.map((d) => [
+      d.requestId,
+      {
+        plan: JSON.parse(d.planJson) as { backendId: string; action: string; reason: string }[],
+        fallbackTriggered: d.fallbackTriggered,
+      },
+    ]),
+  );
+
   return {
     session,
     turns: turns.map((r) => ({
@@ -143,6 +163,7 @@ export async function sessionTurns(
       retrievalConfidence: r.confidence,
       intent: r.intent,
       error: r.error,
+      ...(planByRequest.get(r.id) ?? { plan: [] as { backendId: string; action: string; reason: string }[], fallbackTriggered: false }),
     })),
   };
 }

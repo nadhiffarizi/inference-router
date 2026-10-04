@@ -10,8 +10,9 @@ import {
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
 import { Stat } from "./usage";
-import { Bubble } from "./lib/chatui";
 import { fetchSessionTimeline, type Turn } from "./api";
+import { TraceDialog, type TracePayload } from "./components/trace-dialog";
+import { Bubble } from "./lib/chatui";
 
 /**
  * Admin-only cross-tenant view: usage for every tenant plus the routing
@@ -77,7 +78,7 @@ type Observability = {
 export function ObservabilityView(): React.ReactElement {
   const [data, setData] = useState<Observability | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openTrace, setOpenTrace] = useState<ActivityRow | null>(null);
+  const [openTrace, setOpenTrace] = useState<TracePayload | null>(null);
   const [openSessionUid, setOpenSessionUid] = useState<number | null>(null);
 
   useEffect(() => {
@@ -350,7 +351,18 @@ export function ObservabilityView(): React.ReactElement {
         </Card>
       </section>
 
-      <TraceDialog trace={openTrace} plan={openTrace ? data.decisions.find((d) => d.requestId === openTrace.id)?.plan ?? null : null} onClose={() => setOpenTrace(null)} />
+      <TraceDialog
+        trace={
+          openTrace
+            ? {
+                ...openTrace,
+                plan: data.decisions.find((d) => d.requestId === openTrace.id)?.plan ?? [],
+                fallbackTriggered: data.decisions.find((d) => d.requestId === openTrace.id)?.fallbackTriggered,
+              }
+            : null
+        }
+        onClose={() => setOpenTrace(null)}
+      />
       <SessionDialog uid={openSessionUid} onClose={() => setOpenSessionUid(null)} />
     </div>
   );
@@ -411,86 +423,3 @@ function SessionDialog({ uid, onClose }: { uid: number | null; onClose: () => vo
   );
 }
 
-/**
- * Langfuse-mini: the stored chat turn — question, answer, what was retrieved,
- * how it was routed, what it cost. One dialog per activity row.
- */
-function TraceDialog({ trace, plan, onClose }: { trace: ActivityRow | null; plan: Observability["decisions"][number]["plan"] | null; onClose: () => void }): React.ReactElement {
-  return (
-    <Dialog open={trace !== null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
-        {trace && (
-          <>
-            <DialogHeader>
-              <DialogTitle>trace · {trace.createdAt.slice(0, 19).replace("T", " ")} UTC</DialogTitle>
-            </DialogHeader>
-
-            {/* summary badges */}
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={outcomeBadge(trace.outcome)}>{trace.outcome}</Badge>
-              <Badge variant={trace.capability === "support-assistant" ? "info" : "secondary"}>{trace.capability}</Badge>
-              <Badge variant="outline" className="font-mono">{trace.backendId}</Badge>
-              <Badge variant="outline" className="font-mono text-[10px]">{trace.modelId}</Badge>
-              {trace.keyLabel && <Badge variant="secondary">{trace.keyLabel}</Badge>}
-              {trace.intent && <Badge variant="success">{trace.intent}</Badge>}
-            </div>
-
-            {/* the turn */}
-            <div className="space-y-3">
-              <Bubble role="user">{trace.question ?? "(not recorded)"}</Bubble>
-              {trace.answer !== null && trace.answer.length > 0 ? (
-                <Bubble role="assistant">{trace.answer}</Bubble>
-              ) : trace.error ? (
-                <Bubble role="assistant" tone="error">{trace.error}</Bubble>
-              ) : (
-                <Bubble role="assistant" tone="warning">(no answer recorded — refused or failed before generation)</Bubble>
-              )}
-            </div>
-
-            {/* retrieval trace */}
-            {trace.retrieval && trace.retrieval.length > 0 && (
-              <div className="rounded-lg border p-3">
-                <p className="text-xs font-medium text-muted-foreground">
-                  retrieved {trace.retrieval.length} entries
-                  {trace.retrievalConfidence !== null ? ` · confidence ${trace.retrievalConfidence.toFixed(2)}` : ""}
-                </p>
-                <ul className="mt-2 space-y-1.5">
-                  {trace.retrieval.map((e) => (
-                    <li key={e.id} className="truncate text-xs text-muted-foreground">
-                      <Badge variant="outline" className="mr-1.5 text-[10px]">{e.intent}</Badge>
-                      {e.question.slice(0, 70)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* routing plan */}
-            {plan && (
-              <div className="rounded-lg border p-3">
-                <p className="text-xs font-medium text-muted-foreground">routing plan</p>
-                <ol className="mt-2 space-y-1">
-                  {plan.map((s, i) => (
-                    <li key={i} className="flex items-center gap-2 text-xs">
-                      <Badge variant={outcomeBadge(s.action)}>{s.action}</Badge>
-                      <span className="font-mono">{s.backendId}</span>
-                      <span className="text-muted-foreground">{s.reason}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            )}
-
-            {/* metering */}
-            <div className="grid grid-cols-4 gap-2 rounded-lg border p-3">
-              <div><p className="text-[10px] text-muted-foreground">tokens</p><p className="font-mono text-sm font-semibold">{trace.tokens}</p></div>
-              <div><p className="text-[10px] text-muted-foreground">cost</p><p className="font-mono text-sm font-semibold">{usd(trace.costUsd)}</p></div>
-              <div><p className="text-[10px] text-muted-foreground">latency</p><p className="font-mono text-sm font-semibold">{trace.latencyMs} ms</p></div>
-              <div><p className="text-[10px] text-muted-foreground">request</p><p className="font-mono text-sm font-semibold">{trace.id.slice(0, 8)}</p></div>
-            </div>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
