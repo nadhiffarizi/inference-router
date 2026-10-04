@@ -26,6 +26,20 @@ Retrieval confidence calibration (why these numbers): probe data in
 off-KB 0.12–0.44. The refusal floor 0.48 sits between the classes with margin
 on both sides. It's a measured threshold, not a vibe.
 
+Two confidence thresholds, deliberately **not** the same number:
+
+- `RETRIEVAL_REFUSE_BELOW` (0.48) — below this the assistant refuses instead
+  of guessing. Nothing at all is routed.
+- `RETRIEVAL_TIER_B_BELOW` (0.55, clamped ≥ the floor) — below this, but above
+  the floor, confidence is "weak": the question is still answered, and the
+  capable tier takes it, because an ambiguous match justifies stronger
+  reasoning.
+
+The swap threshold being strictly above the floor is what makes the
+weak-retrieval → tier-B rule live: a band `[0.48, 0.55)`. If the two were the
+same number, the band collapses to empty and the tier swap becomes dead code
+(the refusal gate runs first and would consume every weak result).
+
 ## The decision (first match wins)
 
 ```
@@ -36,8 +50,8 @@ on both sides. It's a measured threshold, not a vibe.
 2. otherwise compute primary tier:
       chat:           simple question → tier A (fast/cheap)
                       complex question → tier B (capable)
-      assistant:      weak retrieval (below floor would have refused already —
-                      here: just-at-floor ambiguity) OR complex question → tier B
+      assistant:      weak retrieval (0.48 ≤ conf < 0.55 — answered, but
+                      ambiguous → stronger tier) OR complex question → tier B
                       strong retrieval + simple → tier A
 
 3. build the plan: [primary, the other tier]  ← cross-tier fallback is baked in
@@ -80,7 +94,8 @@ These are the parts I want reviewers to read and argue with — they're the
 
 **In env (`config.ts` / `.env`):** which models are tier A/B (`TIER_A_MODEL`
 etc.), their timeouts and price constants, the refusal floor
-(`RETRIEVAL_REFUSE_BELOW`), top-k (`RETRIEVAL_TOP_K`), quota caps, and
+(`RETRIEVAL_REFUSE_BELOW`), the tier-B swap threshold
+(`RETRIEVAL_TIER_B_BELOW`), top-k (`RETRIEVAL_TOP_K`), quota caps, and
 `ROUTING_CHAIN` (demo override only). Operations shouldn't edit code to move
 a threshold; reviewers can see the value in `.env.example`.
 

@@ -11,7 +11,9 @@ import type { ModelAdapter } from "../backends/types.js";
  * The rules are written to be citable in the report:
  *  - Fast/cheap tier (A) handles the bulk: simple-shape questions, strong retrieval.
  *  - Capable tier (B) takes weak-retrieval (ambiguous) or long/multi-part
- *    questions, where extra reasoning is worth the extra cost.
+ *    questions, where extra reasoning is worth the extra cost. "Weak" is a
+ *    band, not a point: below the refusal floor nothing routes (the gate
+ *    fires in the route first), so the swap threshold sits *above* the floor.
  *  - The mock is never chosen by policy — it exists to fail on demand.
  *  - ROUTING_CHAIN env may reorder candidates purely to demo fallback
  *    (e.g. mock first, real backend second) without changing the rules.
@@ -52,8 +54,11 @@ export function questionComplexity(question: string): "simple" | "complex" {
 
 export function choosePrimary(ctx: RouteContext): string {
   const complexity = questionComplexity(ctx.question);
-  if (ctx.capability === "support-assistant" && (ctx.retrievalConfidence ?? 0) < config.assistant.refuseBelowConfidence) {
-    return "openrouter-tier-b"; // weak retrieval → ambiguous match → spend the stronger tier
+  if (
+    ctx.capability === "support-assistant" &&
+    (ctx.retrievalConfidence ?? 0) < config.assistant.tierBSwapBelowConfidence
+  ) {
+    return "openrouter-tier-b"; // weak (but above the refusal floor) retrieval → ambiguous match → spend the stronger tier
   }
   return complexity === "simple" ? "openrouter-tier-a" : "openrouter-tier-b";
 }
@@ -62,7 +67,9 @@ export function primaryReason(ctx: RouteContext): string {
   const complexity = questionComplexity(ctx.question);
   if (ctx.capability !== "support-assistant") return `chat: ${complexity} question`;
   const conf = ctx.retrievalConfidence ?? 0;
-  return `assistant: retrieval confidence ${conf.toFixed(2)} (${conf >= config.assistant.refuseBelowConfidence ? "strong" : "weak"}), ${complexity} question`;
+  // "strong/weak" uses the same comparator as choosePrimary's tier-B swap, so
+  // the label and the decision can never disagree.
+  return `assistant: retrieval confidence ${conf.toFixed(2)} (${conf >= config.assistant.tierBSwapBelowConfidence ? "strong" : "weak"}), ${complexity} question`;
 }
 
 export function buildRoutePlan(ctx: RouteContext, byId: Map<string, ModelAdapter>): Candidate[] {

@@ -118,23 +118,29 @@ The router never calls an LLM to pick an LLM. It computes two cheap local
 signals and does **first-match-wins**:
 
 ```
-① Refuse gate (assistant only): confidence < 0.48  → REFUSE  [handled in the route, before this stage]
-② Weak retrieval (assistant, conf < floor — i.e. just-at-floor ambiguity) → primary = tier B
+① Refuse gate (assistant only): confidence < floor 0.48  → REFUSE  [handled in the route, before this stage]
+② Weak retrieval (assistant, floor ≤ conf < tierB-swap 0.55) → primary = tier B
 ③ Complexity:  long (>240 chars) · ≥2 hint words (because/however/compare/explain/policy/…)
                · multiple '?'             → tier B, else tier A
 ④ Plan = [primary, then the other real tier]   ← cross-tier fallback is BAKED IN, every request
 ```
 
-(`choosePrimary`/`primaryReason`, `rules.ts:53-66`. The refusal gate is at
-`rules.ts:55-57` — weak retrieval maps to tier *B* first, on the theory that
-just-at-floor ambiguity deserves the stronger model.)
+(`choosePrimary`/`primaryReason`, `rules.ts:53-66`. The weak band is
+`[RETRIEVAL_REFUSE_BELOW, RETRIEVAL_TIER_B_BELOW)` = `[0.48, 0.55)` — answered,
+not refused, but an ambiguous match → tier *B* first, because the stronger
+model is worth the cost when the grounding is shaky. The floor and the swap
+threshold are deliberately different numbers: if they were equal, the band
+collapses and the tier swap would be dead code (the gate consumes every weak
+result before the router sees it).)
 
 Three overrides worth knowing:
 
 - **`backendPin`** (eval/debug): puts the pinned adapter first while keeping
   the rest of the plan as fallbacks — this is how the A/B eval runs tier A vs
   tier B *through* the real auth/quota/metering path instead of around it
-  (`rules.ts:69-75`).
+  (`rules.ts:69-75`). Validated against the adapter registry first: an unknown
+  id is a 400 `invalid_input` (with the allowed ids), not a silent ignore — a
+  typo'd pin quietly routing by policy is correct-looking, wrong.
 - **`ROUTING_CHAIN` env**: reorders the whole plan for demos
   (`"mock,openrouter-tier-a"`), without touching rules. Demo-only; unset in
   production.
@@ -207,8 +213,12 @@ After the stream settles (`assistant.ts:164-218`):
 
 1. **Unusable-output guard** (the brief's "model returns something unusable"):
    `answer.trim().length < 15` → convert to `refused: true` with the actual
-   reason, meter it, **don't bump token quota**. Failed output consuming user
-   quota is exactly the fail-closed principle from D-decisions.
+   reason, meter it, **don't bump request/token quota** — a degraded backend
+   can't eat a tenant's daily allowance (fail-closed, same principle as the
+   refusal gate). What *is* charged: the model call really happened, so its
+   tokens + cost are recorded on the `requests` row, and USD spend quota is
+   computed from those rows — the budget reflects reality. Billing the
+   failure but not re punishing the tenant's request allowance is deliberate.
 2. **Metering:** one `requests` row per turn — tokens, latency, ttft (time to
    first token, null when nothing streamed), cost, outcome
    (`ok | refused | failed`), backend/model, key name, and the full turn trace
@@ -258,7 +268,7 @@ Fallback demo: `ROUTING_CHAIN="mock,openrouter-tier-a" MOCK_FAILURE_MODE=hang`
 | dispatch | error / stall / empty stream on candidate | next candidate | yes, until first byte |
 | dispatch | every candidate failed | 502 backend_unavailable + full plan | no |
 | streaming | fault after first byte | explicit `error` SSE event, outcome `failed` | **never** (no mid-answer re-route) |
-| output | unusable model answer | converted to refusal, quota not charged | caller retries |
+| output | unusable model answer | converted to refusal; request/token quota not charged, USD spend still recorded (the call happened) | caller retries |
 
 The one design idea that ties it all together: **every decision before the
 model is cheap and enforced; every failure after first byte is honest and

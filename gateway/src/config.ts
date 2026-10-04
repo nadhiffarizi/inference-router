@@ -113,6 +113,16 @@ export const config = {
      *  Calibrated against probe data: on-KB ≈ 0.48–0.79, off-KB ≈ 0.04–0.37 (rag/kb.ts). */
     refuseBelowConfidence: num("RETRIEVAL_REFUSE_BELOW", 0.48),
     /**
+     * Below this the retrieval is labelled "weak" and the capable tier (B)
+     * takes the question — still answered, never refused. Higher than
+     * `refuseBelowConfidence` on purpose: the band [floor, here) is the
+     * "strong enough to answer, weak enough to spend tier B" gap that makes
+     * the weak-retrieval → tier-B rule live on the route. Clamped to ≥ floor,
+     * because a swap threshold under the refusal floor could never fire
+     * (the gate runs first and refused before the router is consulted).
+     */
+    tierBSwapBelowConfidence: Math.max(num("RETRIEVAL_TIER_B_BELOW", 0.55), num("RETRIEVAL_REFUSE_BELOW", 0.48)),
+    /**
      * Refusal copy — policy text, NOT model output (the model is never called
      * when the gate refuses). One string per refusal path so the chat bubble,
      * the stored turn's answer, and the trace replay all quote the same thing:

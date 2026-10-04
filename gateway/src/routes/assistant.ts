@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { errorBody } from "../lib/errors.js";
+import { errorBody, errors } from "../lib/errors.js";
 import { bumpQuota, readUsage } from "../lib/quota.js";
 import { recordRequest, recordRoutingDecision, type PlanStep } from "../lib/metering.js";
 import { openSse, writeEvent, closeSse } from "../lib/sse.js";
@@ -109,6 +109,12 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
       }
 
       // 3) Route with the confidence as a routing input (DECISIONS.md D5).
+      // A caller-supplied pin must name a real backend. Silent-ignore would be
+      // worse than refusing: a typo'd eval pin would quietly route by policy
+      // while the caller believes the pin is in force.
+      if (req.body.backendPin && !byId.has(req.body.backendPin)) {
+        throw errors.invalidInput(`unknown backendPin "${req.body.backendPin}"`, { allowed: [...byId.keys()] });
+      }
       const routeCtx: RouteContext = {
         capability: "support-assistant",
         question: req.body.message,
@@ -185,6 +191,11 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
       // 4) Unusable-output guard: empty or trivially short answers are a
       //    refusal, not an answer (brief: "handles the case where the model
       //    returns something unusable").
+      //    Billing is deliberately asymmetric here: the model call happened,
+      //    so its tokens + cost land on the `requests` row and count against
+      //    the tenant's USD budget (spend is computed from those rows);
+      //    request/token counters are NOT bumped, so a degraded backend can't
+      //    eat the tenant's daily request allowance.
       const unusable = !streamError && answer.trim().length < 15;
       const latencyMs = Date.now() - started;
       const costUsd = usage.costUsd ?? estimateCost(outcome.chosen.meta.pricePerMTokens, usage);
