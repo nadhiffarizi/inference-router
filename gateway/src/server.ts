@@ -19,7 +19,7 @@ import { hashPassword, maskKey } from "./lib/password.js";
 
 /**
  * Composition root. Boot order matters and is linear on purpose:
- * schema → seed (fresh DB only) → adapters → KB index → routes → listen.
+ * schema → fixture top-up (tenants/users) → adapters → KB index → routes → listen.
  * A missing env var or an unloadable KB fails here, loudly, at boot — the
  * same fail-closed posture applied at construction time.
  */
@@ -27,10 +27,19 @@ import { hashPassword, maskKey } from "./lib/password.js";
 const SYSTEM_PROMPT =
   "You are a concise, helpful API assistant behind a multi-model gateway. Answer plainly.";
 
-async function seedTenantsIfFresh(): Promise<void> {
-  if (!wasFreshDatabase()) return;
+/**
+ * Fixture tenants (D10) top up on EVERY boot, not just a fresh database: the
+ * deployed box keeps its SQLite across restarts, so fixtures added to
+ * SEED_TENANTS after first boot must still land there. Only MISSING names are
+ * inserted — an existing tenant's row (its recorded usage, any env-overridden
+ * limits) is never touched.
+ */
+async function seedFixtureTenants(): Promise<void> {
   const now = new Date().toISOString();
+  const existing = await db.select({ name: tenants.name }).from(tenants);
+  const known = new Set(existing.map((r) => r.name));
   for (const seed of config.seedTenants) {
+    if (known.has(seed.name)) continue;
     const tenantId = await db
       .insert(tenants)
       .values({
@@ -52,13 +61,18 @@ async function seedTenantsIfFresh(): Promise<void> {
       label: `default (${seed.name})`,
       createdAt: now,
     });
+    console.log({ msg: `seeded fixture tenant "${seed.name}"` });
   }
 }
 
-async function seedUsersIfFresh(): Promise<void> {
-  if (!wasFreshDatabase()) return;
+async function seedFixtureUsers(): Promise<void> {
+  // same top-up contract: fixture accounts land wherever the tenant exists,
+  // never duplicated on an email that already has one
   const now = new Date().toISOString();
+  const existing = await db.select({ email: users.email }).from(users);
+  const known = new Set(existing.map((r) => r.email));
   for (const seed of config.seedUsers) {
+    if (known.has(seed.email.toLowerCase())) continue;
     const tenant = await db
       .select({ id: tenants.id })
       .from(tenants)
@@ -76,6 +90,7 @@ async function seedUsersIfFresh(): Promise<void> {
       tenantId: tenant.id,
       createdAt: now,
     });
+    console.log({ msg: `seeded fixture user "${seed.email}"` });
   }
 }
 
@@ -108,8 +123,8 @@ function buildAdapters(): Map<string, ModelAdapter> {
 
 async function main(): Promise<void> {
   bootstrapDatabase();
-  await seedTenantsIfFresh();
-  await seedUsersIfFresh();
+  await seedFixtureTenants();
+  await seedFixtureUsers();
   await loadKbEntriesIfFresh();
 
   const app = Fastify({

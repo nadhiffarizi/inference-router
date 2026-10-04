@@ -64,7 +64,8 @@ export function LoginView({ onLoggedIn }: { onLoggedIn: () => void }): React.Rea
           <p className="mt-4 text-xs text-muted-foreground">
             Demo accounts (credentials in the report's docs):<br />
             <code>team@demo.local</code> — product team view<br />
-            <code>admin@demo.local</code> — product view <span className="font-medium">+ observability</span>
+            <code>admin@demo.local</code> — product view <span className="font-medium">+ observability</span><br />
+            <code>demo@example.local</code> — product view on a zero-quota tenant (the 429 demo)
           </p>
         </CardContent>
       </Card>

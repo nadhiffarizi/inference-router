@@ -61,10 +61,12 @@ Seeded demo accounts (shared for this assessment, password `mekari-demo-2026`):
 
 | account | role | tenant | quota |
 |---|---|---|---|
-| `team@demo.local` | product team | `demo` | 200 req · $1.00/day — **starts keyless**: issue it in the console |
-| `admin@demo.local` | admin (is a tenant: `ops`) | `ops` | 500 req · $10.00/day + Observability |
+| `team@demo.local` | product team | `demo` | 200 req · $0.70/day — **starts keyless**: issue it in the console |
+| `admin@demo.local` | admin (is a tenant: `ops`) | `ops` | 500 req · $0.70/day + Observability |
+| `demo@example.local` | product team | `quota-zero` | 0 req/day — **every** request 429s on the first call (the instant quota demo) |
 | — | eval fixture | `eval` | key `sk_eval_key_000000000000000000` (for `npm run eval`) |
-| — | quota demo | `stress` | 3 req · $0.05/day — burns to a fail-closed 429 in ~4 calls |
+| — | quota demo | `stress` | 3 req · $0.70/day — burns to a fail-closed 429 in ~4 calls |
+| — | zero-quota fixture | `quota-zero` | key `sk_zero_key_0000000000000000` — 429 on request #1 |
 
 ## API
 

@@ -138,9 +138,13 @@ export const config = {
 
   /** Seed tenants are fixtures (DECISIONS.md D10 — no tenant CRUD UI).
    *  Format: "name:key:requestsPerDay:budgetUsdPerDay" — quota currency is USD.
-   *  key "-" = start WITHOUT a key (the console's issue flow becomes the real path). */
+   *  key "-" = start WITHOUT a key (the console's issue flow becomes the real path).
+   *  0 is a legitimate limit: `quota-zero` denies on the FIRST request
+   *  (quota.ts: used+1 > 0), the on-demand 429 demo without firing a sequence.
+   *  Note budgetUsdPerDay 0/omitted = no spend cap (quota.ts checks > 0). */
   seedTenants: (process.env.SEED_TENANTS?.trim() ||
-    "ops:-:500:0.7, demo:-:200:0.7, stress:sk_stress_key_0000000000000000:3:0.7, eval:sk_eval_key_000000000000000000:500:0.7")
+    "ops:-:500:0.7, demo:-:200:0.7, stress:sk_stress_key_0000000000000000:3:0.7, " +
+    "eval:sk_eval_key_000000000000000000:500:0.7, quota-zero:sk_zero_key_0000000000000000:0:0")
     .split(",")
     .map((entry) => {
       const [name, key, requests, budget] = entry.split(":");
@@ -148,14 +152,19 @@ export const config = {
       return {
         name: name.trim(),
         key: key.trim(),
-        requestsPerDay: Number(requests) || config_defaults.requestQuota,
+        // 0 must stay 0 — `Number(x) || default` would silently turn it into
+        // the full daily quota
+        requestsPerDay: requests === undefined || requests.trim() === "" ? config_defaults.requestQuota : Number(requests.trim()),
         budgetUsdPerDay: budget !== undefined && budget !== "" ? Number(budget) : null,
       };
     }),
 
-  /** Console accounts: "email:password:role:tenantName". Shared demo creds are fine. */
+  /** Console accounts: "email:password:role:tenantName". Shared demo creds are fine.
+   *  demo@example.local sits on quota-zero (0 requests/day) — its Playground
+   *  shows the 429 on the first message, no sequence needed. */
   seedUsers: (process.env.SEED_USERS?.trim() ||
-    "admin@demo.local:mekari-demo-2026:admin:ops, team@demo.local:mekari-demo-2026:product:demo")
+    "admin@demo.local:mekari-demo-2026:admin:ops, team@demo.local:mekari-demo-2026:product:demo, " +
+    "demo@example.local:mekari-demo-2026:product:quota-zero")
     .split(",")
     .map((entry) => {
       const [email, password, role, tenantName] = entry.split(":");

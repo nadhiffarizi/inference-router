@@ -11,7 +11,7 @@ building — each growth stated with its reason (D11–D15).
 |---|---|
 | **GitHub repository** (source + all documentation) | <https://github.com/nadhiffarizi/inference-router> — docs live in [`docs/`](.): this report, [`DECISIONS.md`](DECISIONS.md) (decisions argued before code), [`RULES.md`](RULES.md) (routing rationale), [`FLOW.md`](FLOW.md) (request path + failure shapes), [`EVALUATION.md`](EVALUATION.md) (measured A/B), [`DEPLOY.md`](DEPLOY.md) (runbook), [`demo.postman_collection.json`](demo.postman_collection.json) (the case set of sections 8 and 10, importable) |
 | **Deployed URL** | <https://router.kreasiodigital.com> — health: [`/v1/health`](https://router.kreasiodigital.com/v1/health) (`{"status":"ok"}`); self-hosted: Docker + NGINX + Cloudflare TLS per [`DEPLOY.md`](DEPLOY.md) |
-| **Console credentials** | The login page lists the two account emails only (no passwords shown in the app). Passwords, documented here only: `team@demo.local` / `mekari-demo-2026` (product team view) · `admin@demo.local` / `mekari-demo-2026` (adds cross-tenant Observability) |
+| **Console credentials** | The login page lists the account emails only (no passwords shown in the app). Passwords, documented here only: `team@demo.local` / `mekari-demo-2026` (product team view) · `admin@demo.local` / `mekari-demo-2026` (adds cross-tenant Observability) · `demo@example.local` / `mekari-demo-2026` (product view on the `quota-zero` tenant — its Playground 429s on the first message) |
 
 Companion documents (this report cites each inline; the map is here so the
 set is obvious at a glance):
@@ -263,7 +263,7 @@ in; the mock is never picked by policy (only via 5/7).
 | 2 | Refuse — complex + low conf | complexity high **and** conf < 0.48 | none | refused before routing — tier B never reached even for complex questions |
 | 3 | Refuse — unusable output | answer < 15 chars after trim (14 → refused; 15 → served; whitespace-only refused) | yes, then discarded | converted to refusal; token/request counters not bumped, USD spend still recorded |
 | 4 | Fallback → next tier | candidate error / stall past timeout (A 8s, B 20s, mock 6s) / empty stream, before first byte | yes, then next | failed/abandoned step → next serves, `fallbackTriggered: true`; unreached tail recorded `skipped` |
-| 5 | Quota — requests | used+1 > requestsPerDay (the `stress` seed tenant: 3/day) | none | 429 `quota_exceeded` + `{limit, used, reset}` |
+| 5 | Quota — requests | used+1 > requestsPerDay (`stress`: 3/day crossed over a few calls; `quota-zero`: 0/day denies on request #1) | none | 429 `quota_exceeded` + `{limit, used, reset}` |
 | 6 | Auth — unknown/foreign key | wrong key; keys are SHA-256 at rest, one key = one tenant | none | 401 |
 | 7 | Validation | empty message, >4000 chars, unknown field | none | 400 `invalid_input` (schema, `additionalProperties: false`) |
 | 8 | Upstream outage | both tiers unreachable | tried both | 502 `backend_unavailable` — full plan in body |
@@ -321,8 +321,10 @@ BASE=https://router.kreasiodigital.com          # or http://127.0.0.1:4000
 KEY=sk_…your_key
 AUTH="Authorization: Bearer $KEY"
 CT="Content-Type: application/json"
-# fixture for the quota case only (3 req/day seed tenant)
+# fixtures for the quota case: STRESS crosses a 3 req/day limit over a few
+# calls; ZERO (quota-zero tenant, 0 req/day) denies on request #1 — see B5/B5b
 STRESS=sk_stress_key_0000000000000000
+ZERO=sk_zero_key_0000000000000000
 ```
 
 Reading the responses: streaming routes answer with SSE — the first
@@ -386,6 +388,14 @@ done
 #   {limit, used, reset:"UTC midnight"}; counters are UTC-daily, so the exact
 #   step at which it lands depends on today's use of the fixture key — a fresh
 #   midnight gives exactly 3 × 200 then 429 on the 4th.
+
+## B5b — quota, instant variant: the quota-zero fixture denies on request #1
+curl -s "$BASE/v1/support-assistant" -X POST \
+  -H "Authorization: Bearer $ZERO" -H "$CT" -d '{"message":"hi"}'
+#   HTTP 429 quota_exceeded on the very first call (used+1 > 0) — the same
+#   fail-closed behaviour B5 walks up to, with no sequence needed. Console
+#   demo: log in as demo@example.local, connect the Playground with the ZERO
+#   key, send one message → quota_exceeded in the chat bubble and the X-ray.
 
 ## B6 — auth fails closed: unknown key, and no header at all (same shape)
 curl -s "$BASE/v1/support-assistant" -X POST \
