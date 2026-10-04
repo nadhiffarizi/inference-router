@@ -280,8 +280,9 @@ function SessionChat({
 
   return (
     <div className="mx-auto flex flex-col gap-5 pt-5 lg:h-[calc(100svh-8.5rem)] lg:flex-row lg:gap-0">
-      {/* session rail — its own pane, divider on the right from lg up */}
-      <aside className="flex w-full shrink-0 flex-col gap-2 pb-4 lg:h-full lg:min-h-0 lg:w-52 lg:border-r lg:border-border lg:pr-5 xl:w-56">
+      {/* session rail — its own pane from lg up; hidden below lg so the
+          interface is chat-only, no rail stacked on top */}
+      <aside className="hidden shrink-0 flex-col gap-2 lg:flex lg:h-full lg:min-h-0 lg:w-52 lg:border-r lg:border-border lg:pr-5 xl:w-56">
         <div className="flex shrink-0 items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">sessions</p>
           <Button size="sm" variant="ghost" onClick={() => void newSession()} title="new session">

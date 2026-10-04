@@ -37,10 +37,12 @@ export type TracePayload = {
 export function TraceDialog({ trace, onClose }: { trace: TracePayload | null; onClose: () => void }): React.ReactElement {
   return (
     <Dialog open={trace !== null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      {/* flex+gap so the summary, turn, retrieval, routing and metering blocks separate */}
+      <DialogContent className="flex max-w-2xl flex-col gap-4">
         {trace && (
           <>
-            <DialogHeader>
+            {/* mb-0: the flex gap covers the header's spacing */}
+            <DialogHeader className="mb-0">
               <DialogTitle>trace · {trace.createdAt.slice(0, 19).replace("T", " ")} UTC</DialogTitle>
             </DialogHeader>
 
