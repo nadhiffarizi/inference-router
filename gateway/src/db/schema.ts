@@ -8,7 +8,7 @@ export const tenants = sqliteTable("tenants", {
   requestsPerDay: integer("requests_per_day").notNull(),
   tokensPerDay: integer("tokens_per_day").notNull(),
   /** Daily spend budget in USD — quota currency is dollars (admin/team decision 2026-10-03). */
-  budgetUsdPerDay: real("budget_usd_per_day").notNull().default(1.0),
+  budgetUsdPerDay: real("budget_usd_per_day").notNull().default(0.7),
   createdAt: text("created_at").notNull(),
 });
 

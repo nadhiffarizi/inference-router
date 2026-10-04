@@ -126,7 +126,7 @@ export function bootstrapDatabase(): void {
   // Column migrations for pre-existing databases: SQLite ALTER TABLE ADD
   // COLUMN errors if it exists, which is the idempotence mechanism here.
   for (const stmt of [
-    "ALTER TABLE tenants ADD COLUMN budget_usd_per_day REAL NOT NULL DEFAULT 1.0",
+    "ALTER TABLE tenants ADD COLUMN budget_usd_per_day REAL NOT NULL DEFAULT 0.7",
     "ALTER TABLE api_keys ADD COLUMN masked_key TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE api_keys ADD COLUMN key_plain TEXT",
     "ALTER TABLE requests ADD COLUMN api_key_id INTEGER",

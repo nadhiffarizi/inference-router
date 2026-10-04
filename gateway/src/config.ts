@@ -100,8 +100,10 @@ export const config = {
   quota: {
     requestsPerDay: num("QUOTA_REQUESTS_PER_DAY", 200),
     tokensPerDay: num("QUOTA_TOKENS_PER_DAY", 500_000),
-    /** Quota currency is USD (no credits layer — same unit the metering records). */
-    budgetUsdPerDay: num("QUOTA_BUDGET_USD_PER_DAY", 1),
+    /** Quota currency is USD (no credits layer — same unit the metering records).
+     *  Small by design: per-request cost is ~1e-4..1e-5 USD, so a big budget
+     *  never visibly moves the "remaining" number in the console. */
+    budgetUsdPerDay: num("QUOTA_BUDGET_USD_PER_DAY", 0.7),
   },
 
   assistant: {
@@ -128,7 +130,7 @@ export const config = {
    *  Format: "name:key:requestsPerDay:budgetUsdPerDay" — quota currency is USD.
    *  key "-" = start WITHOUT a key (the console's issue flow becomes the real path). */
   seedTenants: (process.env.SEED_TENANTS?.trim() ||
-    "ops:-:500:10, demo:-:200:1, stress:sk_stress_key_0000000000000000:3:0.05, eval:sk_eval_key_000000000000000000:500:1")
+    "ops:-:500:0.7, demo:-:200:0.7, stress:sk_stress_key_0000000000000000:3:0.7, eval:sk_eval_key_000000000000000000:500:0.7")
     .split(",")
     .map((entry) => {
       const [name, key, requests, budget] = entry.split(":");
