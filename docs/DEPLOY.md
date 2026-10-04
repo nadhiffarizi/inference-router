@@ -1,8 +1,7 @@
 # Deploy runbook — self-hosted box + NGINX
 
 Deploy target (per DECISIONS.md D9): this box, systemd + NGINX, Cloudflare
-DNS subdomain. Everything below assumes the repo lives at
-`/home/kreasiodigital/repo/inference-router`.
+DNS subdomain. Assume the repo lives at `/home/kreasiodigital/repo/inference-router`.
 
 ## 1. Build
 
@@ -10,16 +9,20 @@ DNS subdomain. Everything below assumes the repo lives at
 npm install
 npm run build            # gateway/dist + console/dist
 npm run build:kb         # data/kb.json + data/eval.json (first run only)
-cp gateway/.env.example gateway/.env   # fill OPENROUTER_API_KEY, tiers
+cp gateway/.env.example gateway/.env   # fill OPENROUTER_API_KEY + tier models
 ```
 
-## 2. Reset DB for production (fresh seeds)
+Credentials via env are appended automatically: `SEED_TENANTS` and
+`SEED_USERS` (see `.env.example`) seed `ops`/`demo` keyless, `stress`/`eval`
+with fixture keys, and the two console accounts.
+
+## 2. Fresh DB for production
 
 ```bash
-rm -f gateway/data/gateway.sqlite*
+rm -f gateway/data/gateway.sqlite*   # first boot recreates + seeds
 ```
 
-## 3. systemd unit — `/etc/systemd/system/inference-router.service`
+## 3. systemd — `/etc/systemd/system/inference-router.service`
 
 ```ini
 [Unit]
@@ -29,8 +32,8 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/home/kreasiodigital/repo/inference-router/gateway
-# demo-fallback env vars belong in dev, not prod — leave defaults:
 Environment=NODE_ENV=production
+Environment=COOKIE_SECURE=true
 EnvironmentFile=/home/kreasiodigital/repo/inference-router/gateway/.env
 ExecStart=/usr/bin/node --require /home/kreasiodigital/repo/inference-router/node_modules/tsx/dist/preflight.cjs dist/server.js
 Restart=always
@@ -43,9 +46,13 @@ WantedBy=multi-user.target
 
 `sudo systemctl daemon-reload && sudo systemctl enable --now inference-router`
 
-(Alternative without tsx preflight: `npm run build && node dist/server.js` —
-`dist` is plain ESM; the `--require tsx preflight` line is only needed while
-running TS sources directly.)
+Notes:
+- `dist/server.js` is plain ESM — the tsx preflight line is only needed while
+  running TS sources; drop `--require …` and use `node dist/server.js` if you
+  build first.
+- `COOKIE_SECURE=true` — the session cookie requires HTTPS (Cloudflare terminates TLS in front).
+- Demo-fallback env (`ROUTING_CHAIN`, `MOCK_FAILURE_*`) belongs in dev only —
+  leave it unset in production so routing is pure policy.
 
 ## 4. NGINX
 
@@ -54,7 +61,6 @@ server {
     listen 80;
     server_name router.<your-domain>;
 
-    # static console
     root /home/kreasiodigital/repo/inference-router/console/dist;
     index index.html;
 
@@ -68,31 +74,31 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Connection '';
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;          # SSE must not buffer
         proxy_read_timeout 300s;
     }
 }
 ```
 
-TLS: Cloudflare-proxied subdomain → origin over HTTP or an origin certificate
-under `/etc/nginx/ssl/` (flexible or full mode both work; the SSE needs
-`proxy_buffering off` either way).
+TLS: Cloudflare-proxied subdomain (flexible or full mode both work; the SSE
+needs `proxy_buffering off` either way). `trustProxy` is on in the gateway, so
+`X-Forwarded-Proto` keeps `secure` cookies and protocol detection correct.
 
 ## 5. Verify
 
 ```bash
 curl https://router.<domain>/v1/health
-curl -s https://router.<domain>/v1/chat \
-  -H "Authorization: Bearer sk_demo_key_0000000000000000" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"hello"}'
+# console: https://router.<domain>/ → login team@demo.local / mekari-demo-2026
+# flow: issue key → copy → paste into playground → ask a question →
+#       watch routing/retrieval/metering; Usage; admin login → Observability
 ```
-
-Console: `https://router.<domain>/` → playground + usage.
 
 ## 6. Notes
 
 - Quota counters reset at UTC midnight; restart-safe (SQLite WAL).
-- Update flow: `git pull && npm run build && sudo systemctl restart inference-router`.
-- Tenant keys are seed fixtures (see `SEED_TENANTS`); regenerate before a
-  public demo and they're hashed in the DB anyway.
+- Update flow: `git pull && npm install && npm run build && sudo systemctl restart inference-router`.
+- Console accounts are seeded from `SEED_USERS`; change passwords there when
+  making the demo public.
+- Sessions are long-lived (30d cookie) by demo decision; logs/restarts don't
+  log anyone out (sessions live in SQLite).

@@ -160,3 +160,73 @@ Cut deliberately rather than half-build:
 - No retries beyond the single fallback hop.
 - No console auth (internal surface); tenant auth is the assessed boundary.
 - No cost-calibration wizard: provider prices are config constants.
+---
+
+## Addendum — decisions made while building (2026-10-04)
+
+The sections below were decided during development, after D10 was written.
+Where they supersede earlier cuts, the supersession is stated — the honest
+version of "scope grew on purpose", and the reason each addition still serves
+the brief's core requirements rather than decorating them.
+
+### D11 — Console accounts: admin IS a tenant; session cookie, no JWT
+
+The console gained accounts (`users` + `sessions`, scrypt-hashed passwords,
+opaque 30-day cookie) so tenancy is *demonstrated in UI* instead of asserted
+in prose. The product-team account experiences exactly what a customer gets:
+keyless start → issue key → integrate. The admin account is **a tenant like
+any other** — identical Playground / API Keys / Usage flows — plus one extra
+menu, **Observability** (cross-tenant reads + decision log), enforced
+server-side (403 for product users, not hidden by CSS).
+
+This supersedes D3's "no login system" and D10's "no tenant CRUD UI" — the
+substitution: full RBAC (users × roles × permission UI) stayed cut; what was
+built is identity + one role bit, the minimum that makes *one key = one
+tenant identity* visible. Product flows keep API-key auth; sessions never
+leak into the request path.
+
+### D12 — One account, one key; irreplaceable; named
+
+Issuance only when the account has no key (409 otherwise). Rotation was
+removed by explicit simplification — a key is a permanent identity artifact
+for this demo, not a rotating credential (fixtures reset via a fresh database).
+Keys are **named at issuance** (dialog, required) and tracked by name —
+OpenRouter's model: usage and observability aggregate **per key name**, and
+metering rows carry the key's denormalized label so history survives any key
+lifecycle. Product/admin tenants seed *keyless* so the console issue flow is
+the real path; the `eval` tenant keeps a fixture key for the A/B harness.
+
+### D13 — Quota currency is USD
+
+Two counters fail closed: requests/day and a **USD spend budget/day**
+computed from the same metering rows the cost column records. No credits
+layer: a credit system needs a conversion rate for zero product value, and it
+would blur the brief's "cost recorded accurately" criterion. The earlier
+tokens/day ceiling stays as an abuse backstop.
+
+### D14 — Activity feed + trace viewer ("Langfuse-mini")
+
+OpenRouter's *activity* pattern for the gateway calls: one row per request
+(time, tenant, key name, model, outcome, tokens, cost, latency → clickable).
+A stored **turn trace** rides on the metering row (`question`, `answer`,
+`retrieval_json`), so every call is *replayable*, not just countable. The
+viewer dialog shows the turn end to end: question bubble → answer (or refusal
+reason) → retrieved entries + confidence → routing plan → metering. Own
+implementation on our design system; Langfuse is a conceptual reference only.
+
+### D15 — Chat sessions: grouping, never memory
+
+Optional caller-declared `sessionId` on the product endpoints (≤100 chars).
+Grouping on first sight: an unseen id creates the session (title = first
+question); later turns join by `(tenant_id, external_id)` uniqueness —
+another tenant's identical id can never attach. The playground generates its
+own uuids; a product team passes their ticket id — **same mechanism**, no
+gateway-side session issuance. Deletion is soft (`deleted_at`): hidden from
+the tenant surface, retained for observability.
+
+Boundary kept deliberately: sessions are **trace grouping, not model
+context**. The assistant stays single-turn (D10's cut stands for memory) —
+the eval measures single-turn quality and the gateway does not become a party
+to tenant conversation state. The defense: this is exactly Langfuse's model —
+sessions explain *who was talking to whom*, prompts describe *what the model
+received*.
