@@ -1,28 +1,96 @@
 # Deploy runbook — self-hosted box + NGINX
 
-Deploy target (per DECISIONS.md D9): this box, systemd + NGINX, Cloudflare
-DNS subdomain. Assume the repo lives at `/home/kreasiodigital/repo/inference-router`.
+Deploy target (per DECISIONS.md D9): this box, Cloudflare DNS subdomain. The
+primary path is **Docker** (one container serves the gateway *and* the built
+console on :3000, exposed only on `127.0.0.1:4000`); NGINX fronts it. Assume
+the repo lives at `/home/kreasiodigital/repo/inference-router`.
 
-## 1. Build
+## 1. Configure
+
+```bash
+cp gateway/.env.example gateway/.env   # fill OPENROUTER_API_KEY + tier models
+npm run build:kb                       # data/kb.json (first run only)
+```
+
+Credentials via env are seeded on first boot: `SEED_TENANTS` and `SEED_USERS`
+(see `.env.example`) seed `ops`/`demo` keyless, `stress`/`eval` with fixture
+keys, and the two console accounts.
+
+## 2. Docker
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+The compose file pins: `PORT=3000` (in-container), `CONSOLE_DIST=/app/console/dist`
+(gateway serves the console — one origin), `COOKIE_SECURE=true` (TLS terminates
+in front), binds `127.0.0.1:4000:3000` so the container is **not** reachable on
+the public interface, mounts `./gateway/data` for SQLite persistence, and runs
+as the host account (`user: "1001:1001"` — adjust if you deploy as another user).
+
+```bash
+curl http://127.0.0.1:4000/v1/health     # {"status":"ok"}
+```
+
+## 3. NGINX
+
+The rule ships in the repo:
+
+```bash
+sudo cp nginx/router.kreasiodigital.com.conf /etc/nginx/sites-available/
+sudo ln -sf /etc/nginx/sites-available/router.kreasiodigital.com /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+It proxies *everything* to `127.0.0.1:4000` with `proxy_buffering off` (SSE must
+not buffer) and `proxy_read_timeout 300s`. TLS: run
+
+```bash
+sudo certbot --nginx -d router.kreasiodigital.com
+```
+
+(or terminate TLS at Cloudflare; `trustProxy` is on, so `X-Forwarded-Proto`
+keeps `secure` cookies and protocol detection correct).
+
+## 4. Verify
+
+```bash
+curl https://router.kreasiodigital.com/v1/health
+# console: https://router.kreasiodigital.com/ → login team@demo.local
+# flow: issue key → copy → paste into playground → ask a question →
+#       watch routing/retrieval/metering; Usage; admin login → Observability
+```
+
+## 5. Notes
+
+- Quota counters reset at UTC midnight; restart-safe (SQLite WAL).
+- Update flow: `git pull && docker compose build && docker compose up -d`.
+- Console accounts are seeded from `SEED_USERS`; change passwords there when
+  making the demo public.
+- Sessions are long-lived (30d cookie) by demo decision; logs/restarts don't
+  log anyone out (sessions live in SQLite).
+- Demo-fallback env (`ROUTING_CHAIN`, `MOCK_FAILURE_*`) belongs in dev only —
+  leave it unset so routing is pure policy.
+
+---
+
+# Alternative: bare systemd (no Docker)
+
+## Build
 
 ```bash
 npm install
 npm run build            # gateway/dist + console/dist
-npm run build:kb         # data/kb.json + data/eval.json (first run only)
-cp gateway/.env.example gateway/.env   # fill OPENROUTER_API_KEY + tier models
 ```
 
-Credentials via env are appended automatically: `SEED_TENANTS` and
-`SEED_USERS` (see `.env.example`) seed `ops`/`demo` keyless, `stress`/`eval`
-with fixture keys, and the two console accounts.
-
-## 2. Fresh DB for production
+## Fresh DB for production
 
 ```bash
 rm -f gateway/data/gateway.sqlite*   # first boot recreates + seeds
 ```
 
-## 3. systemd — `/etc/systemd/system/inference-router.service`
+## systemd — `/etc/systemd/system/inference-router.service`
 
 ```ini
 [Unit]
@@ -54,7 +122,9 @@ Notes:
 - Demo-fallback env (`ROUTING_CHAIN`, `MOCK_FAILURE_*`) belongs in dev only —
   leave it unset in production so routing is pure policy.
 
-## 4. NGINX
+## NGINX (bare path only — the docker path uses the repo rule)
+
+Serve the console statically and proxy only `/v1/*` to the gateway process:
 
 ```nginx
 server {
@@ -85,20 +155,5 @@ TLS: Cloudflare-proxied subdomain (flexible or full mode both work; the SSE
 needs `proxy_buffering off` either way). `trustProxy` is on in the gateway, so
 `X-Forwarded-Proto` keeps `secure` cookies and protocol detection correct.
 
-## 5. Verify
-
-```bash
-curl https://router.<domain>/v1/health
-# console: https://router.<domain>/ → login team@demo.local / mekari-demo-2026
-# flow: issue key → copy → paste into playground → ask a question →
-#       watch routing/retrieval/metering; Usage; admin login → Observability
-```
-
-## 6. Notes
-
-- Quota counters reset at UTC midnight; restart-safe (SQLite WAL).
-- Update flow: `git pull && npm install && npm run build && sudo systemctl restart inference-router`.
-- Console accounts are seeded from `SEED_USERS`; change passwords there when
-  making the demo public.
-- Sessions are long-lived (30d cookie) by demo decision; logs/restarts don't
-  log anyone out (sessions live in SQLite).
+Verify and update as in the docker path (`git pull && npm run build && sudo
+systemctl restart inference-router`).

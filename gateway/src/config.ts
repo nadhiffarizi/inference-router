@@ -41,6 +41,12 @@ const config_defaults = { requestQuota: 200 };
 export const config = {
   port: num("PORT", 8787),
   dbPath: process.env.DB_PATH?.trim() || "data/gateway.sqlite",
+  /**
+   * When set (docker/single-process deploys), the gateway also serves the
+   * built console from this directory — one origin, one process. Unset in
+   * dev, where vite serves the console and proxies /v1.
+   */
+  consoleDist: process.env.CONSOLE_DIST?.trim() || "",
 
   openrouter: {
     apiKey: req("OPENROUTER_API_KEY"),

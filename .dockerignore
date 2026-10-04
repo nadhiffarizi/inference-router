@@ -1,0 +1,13 @@
+node_modules
+dist
+console/dist
+gateway/dist
+gateway/data/gateway.sqlite*
+.env
+.env.*
+*.log
+.DS_Store
+uploads
+.git
+docs
+eval/results

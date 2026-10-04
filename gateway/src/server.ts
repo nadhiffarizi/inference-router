@@ -120,6 +120,26 @@ async function main(): Promise<void> {
   await app.register(cors, { origin: true });
   await app.register(cookie, {});
 
+  // Single-process deploy (docker): serve the built console from this process
+  // so one origin serves both the UI and the API. Explicit /v1 routes keep
+  // precedence; unset env leaves behaviour identical to the dev setup.
+  if (config.consoleDist) {
+    const fastifyStatic = (await import("@fastify/static")).default;
+    await app.register(fastifyStatic, { root: config.consoleDist });
+    app.log.info({ dir: config.consoleDist }, "serving console dist");
+    // Console uses real paths (/playground, /keys, …): anything that isn't a
+    // static file and not an API call gets the SPA shell, so a refresh or a
+    // shared deep link lands on the right menu.
+    app.setNotFoundHandler((req, reply) => {
+      const url = req.raw.url ?? "/";
+      if (url.startsWith("/v1")) {
+        reply.status(404).send(errorBody("not_found", `no route for ${req.method} ${url}`));
+        return;
+      }
+      void reply.sendFile("index.html");
+    });
+  }
+
   const byId = buildAdapters();
   const kb = loadKb();
   app.log.info({ kb }, "knowledge base indexed");

@@ -1,0 +1,25 @@
+services:
+  router:
+    build: .
+    image: inference-router
+    container_name: inference-router
+    # Host :4000 → container :3000. The nginx rule fronts 127.0.0.1:4000, so
+    # the app is never reachable on the public interface directly.
+    ports:
+      - "127.0.0.1:4000:3000"
+    env_file:
+      - gateway/.env
+    environment:
+      # Overrides — compose wins over .env so the container contract is
+      # independent of what's in the local env file.
+      PORT: "3000"
+      CONSOLE_DIST: /app/console/dist
+      COOKIE_SECURE: "true" # TLS terminates at nginx/Cloudflare in front
+    volumes:
+      # SQLite (WAL) + kb seed persist across rebuilds. kb.json must exist on
+      # the host (npm run build:kb) for a first boot to seed the KB.
+      - ./gateway/data:/app/gateway/data
+    # Match the host user (kreasiodigital) so bind-mounted SQLite files stay
+    # owned/writable here — adjust if deploying under a different account.
+    user: "1001:1001"
+    restart: unless-stopped

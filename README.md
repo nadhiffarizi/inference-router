@@ -105,5 +105,7 @@ MOCK_FAILURE_MODE=hang   # exercises the stall → per-chunk router timeout → 
 
 ## Deploy
 
-Self-hosted: systemd + NGINX (static console, `/v1/*` proxied) — runbook in
-[`docs/DEPLOY.md`](docs/DEPLOY.md).
+Self-hosted: Docker (one container: gateway + console, host port 4000) behind
+NGINX — runbook in [`docs/DEPLOY.md`](docs/DEPLOY.md); the nginx rule ships in
+[`nginx/router.kreasiodigital.com.conf`](nginx/router.kreasiodigital.com.conf).
+Live at **https://router.kreasiodigital.com**.
