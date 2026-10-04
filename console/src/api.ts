@@ -8,8 +8,6 @@ export type Metering = {
   model: string;
   tokens: { prompt: number; completion: number };
   latencyMs: number;
-  /** Time to first token — absent on refusals (nothing streamed). */
-  ttftMs?: number;
   estimatedCostUsd: number;
   costSource: string;
 };

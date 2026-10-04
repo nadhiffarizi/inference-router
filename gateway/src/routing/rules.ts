@@ -1,5 +1,4 @@
 import { config } from "../config.js";
-import { demoControls } from "../lib/demoControls.js";
 import type { ModelAdapter } from "../backends/types.js";
 
 /**
@@ -16,8 +15,7 @@ import type { ModelAdapter } from "../backends/types.js";
  *    band, not a point: below the refusal floor nothing routes (the gate
  *    fires in the route first), so the swap threshold sits *above* the floor.
  *  - The mock is never chosen by policy — it exists to fail on demand.
- *  - ROUTING_CHAIN (env boot default; runtime-editable via the Demo Lab when
- *    DEMO_CONTROLS=1) may reorder candidates purely to demo fallback
+ *  - ROUTING_CHAIN env may reorder candidates purely to demo fallback
  *    (e.g. mock first, real backend second) without changing the rules.
  */
 
@@ -95,8 +93,8 @@ export function buildRoutePlan(ctx: RouteContext, byId: Map<string, ModelAdapter
     plan.push({ adapter, reason: `fallback candidate after ${primary} (cross-tier)` });
   }
 
-  if (demoControls.routingChain()) {
-    const order = demoControls.routingChain().split(",").map((s) => s.trim()).filter(Boolean);
+  if (config.routingChainOverride) {
+    const order = config.routingChainOverride.split(",").map((s) => s.trim()).filter(Boolean);
     const picked = order
       .map((id) => byId.get(id))
       .filter((a): a is ModelAdapter => Boolean(a))

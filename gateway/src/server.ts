@@ -12,7 +12,6 @@ import { registerConsoleRoutes } from "./routes/console.js";
 import { makeOpenRouterAdapter } from "./backends/openrouter.js";
 import { makeMockAdapter } from "./backends/mock.js";
 import { adapterRegistry } from "./routing/dispatch.js";
-import { withDemoFaults } from "./lib/demoControls.js";
 import type { AdapterMeta, ModelAdapter } from "./backends/types.js";
 import { loadKb } from "./rag/kb.js";
 import { errorBody, GatewayError } from "./lib/errors.js";
@@ -100,13 +99,11 @@ function buildAdapters(): Map<string, ModelAdapter> {
   const metaA: AdapterMeta = { id: a.id, label: a.label, modelId: a.model, tier: "a", timeoutMs: a.timeoutMs, pricePerMTokens: a.pricePerMTokens };
   const metaB: AdapterMeta = { id: b.id, label: b.label, modelId: b.model, tier: "b", timeoutMs: b.timeoutMs, pricePerMTokens: b.pricePerMTokens };
   const metaMock: AdapterMeta = { id: m.id, label: m.label, modelId: m.model, tier: "mock", timeoutMs: m.timeoutMs, pricePerMTokens: m.pricePerMTokens };
-  // Every adapter goes through the demo-fault proxy: a pass-through while the
-  // Demo Lab is off/disabled, and the injection point when it isn't.
   return adapterRegistry([
     makeOpenRouterAdapter(metaA),
     makeOpenRouterAdapter(metaB),
     makeMockAdapter(metaMock),
-  ].map(withDemoFaults));
+  ]);
 }
 
 async function main(): Promise<void> {
@@ -150,7 +147,7 @@ async function main(): Promise<void> {
 
   registerChatRoute(app, byId, SYSTEM_PROMPT);
   registerAssistantRoute(app, byId);
-  registerConsoleRoutes(app, byId);
+  registerConsoleRoutes(app);
 
   // Structured errors for every non-stream failure path (auth, quota, JSON
   // validation): machine-readable {error:{code,message,...}} per DECISIONS.
