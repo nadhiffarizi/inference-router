@@ -47,14 +47,18 @@ export async function openWithFallback(plan: Candidate[], streamReq: StreamReque
         lastError = `${cand.adapter.meta.id}: empty stream`;
         continue;
       }
-      const fallbackTriggered = steps.some((s) => s.action === "failed");
+      // Any attempt before this one failed or was abandoned — the caller was
+      // not the plan's head, i.e. fallback fired either way. (An empty stream
+      // is a fallback too; this line only counting "failed" is what made a
+      // fallback trace read "fallback idle" in the X-ray.)
+      const fallbackTriggered = steps.length > 0;
       steps.push({ backendId: cand.adapter.meta.id, action: "served", reason: cand.reason });
       return {
         ok: true,
         chosen: cand.adapter,
         fallbackTriggered,
         stream: guardedStream(iter, first, cand.adapter.meta),
-        steps,
+        steps: steps.concat(notReachedSteps(plan, steps.length, cand.adapter.meta.id)),
       };
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
@@ -63,6 +67,19 @@ export async function openWithFallback(plan: Candidate[], streamReq: StreamReque
     }
   }
   return { ok: false, lastError, steps };
+}
+
+/**
+ * The plan tail the win made unreachable, recorded as steps of its own so the
+ * caller sees every planned backend — which one answered, which was tried and
+ * failed, and which was never called at all.
+ */
+function notReachedSteps(plan: Candidate[], attempts: number, servedBy: string): PlanStep[] {
+  return plan.slice(attempts).map((cand) => ({
+    backendId: cand.adapter.meta.id,
+    action: "skipped",
+    reason: `not reached — ${servedBy} answered first`,
+  }));
 }
 
 /** Race one iterator step against the timeout; also finalizes on loss. */

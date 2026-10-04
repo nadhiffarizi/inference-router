@@ -2,6 +2,7 @@ import { Badge } from "./ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "./ui/dialog";
+import { RouteChain } from "./route-chain";
 import { outcomeBadge } from "../lib/badges";
 import { NO_ANSWER_TEXT } from "../lib/copy";
 import { usd } from "../lib/utils";
@@ -92,19 +93,13 @@ export function TraceDialog({ trace, onClose }: { trace: TracePayload | null; on
               </div>
             )}
 
-            {/* routing plan */}
+            {/* routing plan — the chain, not just the winner */}
             {trace.plan && trace.plan.length > 0 && (
               <div className="rounded-lg border p-3">
                 <p className="text-xs font-medium text-muted-foreground">routing plan</p>
-                <ol className="mt-2 space-y-1">
-                  {trace.plan.map((s, i) => (
-                    <li key={i} className="flex items-center gap-2 text-xs">
-                      <Badge variant={outcomeBadge(s.action)}>{s.action}</Badge>
-                      <span className="font-mono">{s.backendId}</span>
-                      <span className="text-muted-foreground">{s.reason}</span>
-                    </li>
-                  ))}
-                </ol>
+                <div className="mt-2">
+                  <RouteChain plan={trace.plan} />
+                </div>
               </div>
             )}
 

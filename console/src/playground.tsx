@@ -8,10 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input, Textarea } from "./components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import { cn, usd } from "./lib/utils";
-import { outcomeBadge } from "./lib/badges";
 import { NO_ANSWER_TEXT } from "./lib/copy";
 import { Bubble, Markdown } from "./lib/chatui";
 import { TraceDialog, type TracePayload } from "./components/trace-dialog";
+import { RouteChain } from "./components/route-chain";
 
 /**
  * Playground: three resizable panels — session rail (Langfuse-style grouping),
@@ -568,21 +568,10 @@ export function Xray({ meta, final, fault, refused = false, capability = "assist
                   <Badge variant="info">{meta.backend?.id}</Badge>
                   {refused && <Badge variant="warning">refused</Badge>}
                   <span className="min-w-0 font-mono text-xs text-muted-foreground" title={meta.backend?.model}>{meta.backend?.model}</span>
-                  {meta.fallbackTriggered ? <Badge variant="warning">fallback fired</Badge> : <Badge variant="secondary">fallback idle</Badge>}
+                  {meta.fallbackTriggered ? <Badge variant="warning">fallback fired</Badge> : <Badge variant="secondary">first candidate answered</Badge>}
                 </div>
-                <ol className="mt-1 space-y-1.5">
-                  {meta.routingPlan?.map((s, i) => (
-                    // badge + id on a line, reason in its own block below — a
-                    // squeezed flex row would break the reason mid-word
-                    <li key={i} className="flex min-w-0 items-start gap-2 text-xs">
-                      <Badge variant={outcomeBadge(s.action)}>{s.action}</Badge>
-                      <div className="min-w-0">
-                        <span className="font-mono">{s.backendId}</span>
-                        <p className="text-muted-foreground">{s.reason}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
+                {/* the chain, not just the winner: answered / failed / never called, in call order */}
+                <div className="mt-1"><RouteChain plan={meta.routingPlan} /></div>
               </>
             ) : !fault && <p className="text-sm text-muted-foreground">waiting for first request…</p>}
           </CardContent>
