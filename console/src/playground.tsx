@@ -45,15 +45,10 @@ export function Playground(): React.ReactElement {
     setPastedKey(trimmed);
   }
 
-  function disconnect(): void {
-    localStorage.removeItem(KEY_STORAGE);
-    setPastedKey(null);
-  }
-
   if (!pastedKey) {
     return <ConnectGate keysPresent={keys.keys.length > 0} onIssued={connect} onConnect={connect} error={keys.error} />;
   }
-  return <SessionChat apiKey={pastedKey} capability={capability} onCapability={switchCapability} onDisconnect={disconnect} />;
+  return <SessionChat apiKey={pastedKey} capability={capability} onCapability={switchCapability} />;
 }
 
 /** The issue → copy → paste gate (keys are one and irreplaceable). */
@@ -124,8 +119,8 @@ type Exchange =
   | { kind: "turn"; turn: Turn };
 
 function SessionChat({
-  apiKey, capability, onCapability, onDisconnect,
-}: { apiKey: string; capability: Capability; onCapability: (c: Capability) => void; onDisconnect: () => void }): React.ReactElement {
+  apiKey, capability, onCapability,
+}: { apiKey: string; capability: Capability; onCapability: (c: Capability) => void }): React.ReactElement {
   const [sessions, setSessions] = useState<ChatSessionRow[]>([]);
   const [activeExt, setActiveExt] = useState<string>(
     () => localStorage.getItem(SESSION_STORAGE) ?? crypto.randomUUID(),
@@ -135,10 +130,14 @@ function SessionChat({
   const [final, setFinal] = useState<StreamFinal | null>(null);
   const [fault, setFault] = useState<Fault | null>(null);
   const [streamText, setStreamText] = useState("");
+  /** true between the stream's final event and that turn landing in the timeline — the window the live bubble must bridge alone. */
+  const [pendingFinal, setPendingFinal] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  /** Latest requested session for loadTurns — stales out slow list/timeline responses. */
+  const turnsReqRef = useRef<string | null>(null);
   const [openTrace, setOpenTrace] = useState<TracePayload | null>(null);
 
   const refresh = useCallback(async () => {
@@ -151,24 +150,33 @@ function SessionChat({
   }, []);
 
   const loadTurns = useCallback(async (externalId: string) => {
+    turnsReqRef.current = externalId;
     const row = (await fetchChatSessions().catch(() => null))?.find((s) => s.externalId === externalId);
+    if (turnsReqRef.current !== externalId) return; // a newer session took over mid-flight
     if (!row) {
       setExchanges([]);
       return;
     }
     const timeline = await fetchSessionTimeline(row.uid);
+    if (turnsReqRef.current !== externalId) return; // same, across the second await
     setExchanges(timeline ? timeline.turns.map((turn) => ({ kind: "turn" as const, turn })) : []);
   }, []);
 
   useEffect(() => {
+    // switching sessions (rail click or "new session") drops an in-flight
+    // answer — otherwise its onFinal would paint the old session's turn here
+    abortRef.current?.abort();
+    abortRef.current = null;
     void refresh();
     void loadTurns(activeExt);
     localStorage.setItem(SESSION_STORAGE, activeExt);
   }, [activeExt, refresh, loadTurns]);
 
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [exchanges.length, streamText]);
+    // instant while tokens are streaming (repeating smooth scroll fights itself),
+    // smooth for a whole new exchange landing
+    chatBottomRef.current?.scrollIntoView({ behavior: streamText ? "instant" : "smooth", block: "end" });
+  }, [exchanges.length, streamText, fault, final]);
 
   async function newSession(): Promise<void> {
     setActiveExt(crypto.randomUUID());
@@ -176,6 +184,7 @@ function SessionChat({
     setFinal(null);
     setFault(null);
     setStreamText("");
+    setInput("");
     await refresh();
   }
 
@@ -205,8 +214,9 @@ function SessionChat({
           onDelta: (t) => setStreamText((s) => s + t),
           onFinal: (f) => {
             setFinal(f);
+            setPendingFinal(true);
             void refresh();
-            void loadTurns(activeExt);
+            void loadTurns(activeExt).then(() => setPendingFinal(false));
           },
           onError: (code, message) => setFault({ code, message }),
           onDone: () => undefined,
@@ -221,19 +231,21 @@ function SessionChat({
   }
 
   const liveAnswer = final?.refused ? final.message ?? "" : final?.answer ?? streamText;
-  const showLiveExchange = busy || meta || final || fault;
+  // once the persisted turn arrives, the timeline bubble replaces the live one
+  // (final alone would render the same exchange twice)
+  const showLiveExchange = busy || pendingFinal || fault;
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-5 pt-5 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_380px]">
-      {/* session rail */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
+    <div className="mx-auto flex flex-col gap-5 pt-5 lg:h-[calc(100svh-8.5rem)] lg:flex-row lg:gap-0">
+      {/* session rail — its own pane, divider on the right from lg up */}
+      <aside className="flex w-full shrink-0 flex-col gap-2 pb-4 lg:h-full lg:min-h-0 lg:w-52 lg:border-r lg:border-border lg:pr-5 xl:w-56">
+        <div className="flex shrink-0 items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">sessions</p>
           <Button size="sm" variant="ghost" onClick={() => void newSession()} title="new session">
             <MessageSquarePlus className="size-4" />
           </Button>
         </div>
-        <div className="flex max-h-[70vh] flex-col gap-1 overflow-y-auto">
+        <div className="flex max-h-[40svh] min-h-0 flex-col gap-1 overflow-y-auto lg:max-h-none lg:flex-1 lg:pb-0">
           {sessions.length === 0 && (
             <p className="px-1 text-xs text-muted-foreground">no sessions yet — your first message opens one</p>
           )}
@@ -265,65 +277,14 @@ function SessionChat({
             </div>
           ))}
         </div>
-      </div>
+      </aside>
 
-      {/* chat pane */}
-      <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-start-1 xl:row-start-1">
-        <Card>
-          <CardContent className="p-4">
-            <form onSubmit={send}>
-              <Textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask a support question…"
-                rows={3}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send(e);
-                }}
-              />
-              <div className="mt-3 flex items-center justify-between gap-2">
-                {/* capability mode picker, inside the composer (Gemini-style) */}
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button" size="sm" variant={capability === "assistant" ? "secondary" : "ghost"}
-                    className="h-7 rounded-full px-2.5 text-xs"
-                    onClick={() => onCapability("assistant")}
-                    title="grounded support assistant — retrieval, intent, refusal"
-                  >
-                    <Sparkles className="size-3" /> assistant
-                  </Button>
-                  <Button
-                    type="button" size="sm" variant={capability === "chat" ? "secondary" : "ghost"}
-                    className="h-7 rounded-full px-2.5 text-xs"
-                    onClick={() => onCapability("chat")}
-                    title="plain chat capability — no retrieval"
-                  >
-                    <MessageSquareText className="size-3" /> chat
-                  </Button>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button type="button" variant="ghost" size="icon" onClick={onDisconnect} title="disconnect key" className="size-7 text-muted-foreground hidden sm:inline-flex">
-                    <KeyRound className="size-3.5" />
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => void newSession()} title="new session" className="size-7 text-muted-foreground hidden sm:inline-flex">
-                    <MessageSquarePlus className="size-3.5" />
-                  </Button>
-                  {busy ? (
-                    <Button type="button" variant="outline" size="icon" onClick={() => abortRef.current?.abort()} title="stop" className="size-8">
-                      <Square className="size-3.5" />
-                    </Button>
-                  ) : (
-                    <Button type="submit" size="icon" disabled={!input.trim()} title="send" className="size-8 rounded-full">
-                      <ArrowUp className="size-3.5" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        <div className="flex flex-col gap-3">
+      {/* middle: chat pane on top, X-ray below it from lg (right column from xl) */}
+      <section className="flex min-w-0 flex-col lg:h-full lg:min-h-0 lg:pl-5 xl:pr-5">
+        {/* transcript: anchored to the bottom while short, grows + scrolls once long.
+            anchor via the sentinel's mt-auto, NOT justify-end — justify-end in a
+            scroll container makes the top rows unreachable once content overflows */}
+        <div className="flex min-h-[45svh] flex-1 flex-col gap-3 overflow-y-auto pb-4 lg:min-h-0">
           {exchanges.map((x, i) =>
             x.kind === "turn" ? (
               <div key={i}>
@@ -375,24 +336,86 @@ function SessionChat({
             </button>
           )}
           {exchanges.length === 0 && !showLiveExchange && (
-            <p className="py-8 text-center text-sm text-muted-foreground">start with one of these, or type your own</p>
+            <div className="mt-6">
+              <p className="mb-3 text-center text-sm text-muted-foreground">start with one of these, or type your own</p>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {EXAMPLES.map((ex) => (
+                  <Button key={ex} variant="outline" size="sm" className="rounded-full" onClick={() => setInput(ex)}>
+                    <Sparkles className="size-3.5 text-muted-foreground" />
+                    {ex}
+                  </Button>
+                ))}
+              </div>
+            </div>
           )}
+          {/* scroll target + bottom anchor (see note on the container) */}
+          <div ref={chatBottomRef} className="mt-auto" />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Sparkles className="size-4 text-muted-foreground" />
-          {EXAMPLES.map((ex) => (
-            <Button key={ex} variant="outline" size="sm" className="rounded-full" onClick={() => setInput(ex)}>
-              {ex}
-            </Button>
-          ))}
+        {/* composer, Claude/Gemini-style: stays put at the bottom of the pane */}
+        <div className="sticky bottom-24 z-10 md:bottom-4">
+          <Card>
+            <CardContent className="p-4">
+              <form onSubmit={send}>
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Ask a support question…"
+                  rows={3}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send(e);
+                  }}
+                />
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  {/* capability mode picker, inside the composer (Gemini-style) */}
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button" size="sm" variant={capability === "assistant" ? "secondary" : "ghost"}
+                      className="h-7 rounded-full px-2.5 text-xs"
+                      onClick={() => onCapability("assistant")}
+                      title="grounded support assistant — retrieval, intent, refusal"
+                    >
+                      <Sparkles className="size-3" /> assistant
+                    </Button>
+                    <Button
+                      type="button" size="sm" variant={capability === "chat" ? "secondary" : "ghost"}
+                      className="h-7 rounded-full px-2.5 text-xs"
+                      onClick={() => onCapability("chat")}
+                      title="plain chat capability — no retrieval"
+                    >
+                      <MessageSquareText className="size-3" /> chat
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button type="button" variant="ghost" size="icon" onClick={() => void newSession()} title="new session" className="size-7 text-muted-foreground hidden sm:inline-flex">
+                      <MessageSquarePlus className="size-3.5" />
+                    </Button>
+                    {busy ? (
+                      <Button type="button" variant="outline" size="icon" onClick={() => abortRef.current?.abort()} title="stop" className="size-8">
+                        <Square className="size-3.5" />
+                      </Button>
+                    ) : (
+                      <Button type="submit" size="icon" disabled={!input.trim()} title="send" className="size-8 rounded-full">
+                        <ArrowUp className="size-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
         </div>
-      </div>
 
-      {/* X-ray: under the chat on lg, third column on xl */}
-      <div className="hidden min-w-0 flex-col gap-4 lg:flex lg:col-start-2 lg:row-start-2 xl:col-start-3 xl:row-start-1">
+        {/* X-ray under the chat on lg, with a rule between it and the chat */}
+        <div className="hidden min-w-0 flex-col gap-4 lg:flex xl:hidden lg:mt-5 lg:h-72 lg:shrink-0 lg:overflow-y-auto lg:border-t lg:border-border lg:pt-5">
+          <Xray meta={meta} final={final} fault={fault} capability={capability} />
+        </div>
+      </section>
+
+      {/* X-ray as its own right column on xl, divider on its left */}
+      <aside className="hidden min-w-0 shrink-0 flex-col gap-4 overflow-y-auto xl:flex xl:h-full xl:w-[360px] xl:border-l xl:border-border xl:pl-5">
         <Xray meta={meta} final={final} fault={fault} capability={capability} />
-      </div>
+      </aside>
 
       <TraceDialog trace={openTrace} onClose={() => setOpenTrace(null)} />
     </div>
