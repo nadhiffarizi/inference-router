@@ -24,9 +24,19 @@ type Fault = { code: string; message: string };
 
 const EXAMPLES = ["how do I cancel my order?", "what payment methods do you accept?", "what is the meaning of life?"];
 
+export type Capability = "assistant" | "chat";
+
 export function Playground(): React.ReactElement {
   const [pastedKey, setPastedKey] = useState<string | null>(() => localStorage.getItem(KEY_STORAGE));
+  const [capability, setCapability] = useState<Capability>(
+    () => (localStorage.getItem("playground.capability") as Capability) ?? "assistant",
+  );
   const keys = useKeys();
+
+  function switchCapability(c: Capability): void {
+    setCapability(c);
+    localStorage.setItem("playground.capability", c);
+  }
 
   function connect(key: string): void {
     const trimmed = key.trim();
@@ -43,7 +53,7 @@ export function Playground(): React.ReactElement {
   if (!pastedKey) {
     return <ConnectGate keysPresent={keys.keys.length > 0} onIssued={connect} onConnect={connect} error={keys.error} />;
   }
-  return <SessionChat apiKey={pastedKey} onDisconnect={disconnect} />;
+  return <SessionChat apiKey={pastedKey} capability={capability} onCapability={switchCapability} onDisconnect={disconnect} />;
 }
 
 /** The issue → copy → paste gate (keys are one and irreplaceable). */
@@ -113,7 +123,9 @@ type Exchange =
   | { kind: "live"; meta: StreamMeta | null; final: StreamFinal | null; text: string; fault: Fault | null }
   | { kind: "turn"; turn: Turn };
 
-function SessionChat({ apiKey, onDisconnect }: { apiKey: string; onDisconnect: () => void }): React.ReactElement {
+function SessionChat({
+  apiKey, capability, onCapability, onDisconnect,
+}: { apiKey: string; capability: Capability; onCapability: (c: Capability) => void; onDisconnect: () => void }): React.ReactElement {
   const [sessions, setSessions] = useState<ChatSessionRow[]>([]);
   const [activeExt, setActiveExt] = useState<string>(
     () => localStorage.getItem(SESSION_STORAGE) ?? crypto.randomUUID(),
@@ -184,17 +196,22 @@ function SessionChat({ apiKey, onDisconnect }: { apiKey: string; onDisconnect: (
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      await postStream("/v1/support-assistant", { message: input, sessionId: activeExt }, apiKey, {
-        onMeta: setMeta,
-        onDelta: (t) => setStreamText((s) => s + t),
-        onFinal: (f) => {
-          setFinal(f);
-          void refresh();
-          void loadTurns(activeExt);
+      await postStream(
+        capability === "chat" ? "/v1/chat" : "/v1/support-assistant",
+        { message: input, sessionId: activeExt, ...(capability === "chat" ? { maxTokens: 500 } : {}) },
+        apiKey,
+        {
+          onMeta: setMeta,
+          onDelta: (t) => setStreamText((s) => s + t),
+          onFinal: (f) => {
+            setFinal(f);
+            void refresh();
+            void loadTurns(activeExt);
+          },
+          onError: (code, message) => setFault({ code, message }),
+          onDone: () => undefined,
         },
-        onError: (code, message) => setFault({ code, message }),
-        onDone: () => undefined,
-      }, controller.signal);
+        controller.signal);
     } catch (err) {
       if (!controller.signal.aborted) setFault({ code: "network", message: String(err) });
     } finally {
@@ -254,6 +271,15 @@ function SessionChat({ apiKey, onDisconnect }: { apiKey: string; onDisconnect: (
       <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-start-1 xl:row-start-1">
         <Card>
           <CardContent className="p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">capability:</span>
+              <Button type="button" size="sm" variant={capability === "assistant" ? "default" : "outline"} className="rounded-full" onClick={() => onCapability("assistant")}>
+                support assistant
+              </Button>
+              <Button type="button" size="sm" variant={capability === "chat" ? "default" : "outline"} className="rounded-full" onClick={() => onCapability("chat")}>
+                plain chat
+              </Button>
+            </div>
             <form onSubmit={send}>
               <Textarea
                 value={input}
@@ -309,7 +335,7 @@ function SessionChat({ apiKey, onDisconnect }: { apiKey: string; onDisconnect: (
                 setOpenTrace({
                   id: meta?.requestId ?? "-",
                   createdAt: new Date().toISOString(),
-                  capability: "support-assistant",
+                  capability: capability === "chat" ? "chat" : "support-assistant",
                   keyLabel: null,
                   backendId: meta?.backend?.id ?? "none",
                   modelId: meta?.backend?.model ?? "none",
@@ -355,7 +381,7 @@ function SessionChat({ apiKey, onDisconnect }: { apiKey: string; onDisconnect: (
 
       {/* X-ray: under the chat on lg, third column on xl */}
       <div className="hidden min-w-0 flex-col gap-4 lg:flex lg:col-start-2 lg:row-start-2 xl:col-start-3 xl:row-start-1">
-        <Xray meta={meta} final={final} fault={fault} />
+        <Xray meta={meta} final={final} fault={fault} capability={capability} />
       </div>
 
       <TraceDialog trace={openTrace} onClose={() => setOpenTrace(null)} />
@@ -372,7 +398,7 @@ function TwoBubbles({ q, a, error, refused, live }: { q: string; a: string | nul
   );
 }
 
-export function Xray({ meta, final, fault }: { meta: StreamMeta | null; final: StreamFinal | null; fault: Fault | null }): React.ReactElement {
+export function Xray({ meta, final, fault, capability = "assistant" }: { meta: StreamMeta | null; final: StreamFinal | null; fault: Fault | null; capability?: Capability }): React.ReactElement {
   return (
     <div className="flex flex-col gap-4">
       <Card>
