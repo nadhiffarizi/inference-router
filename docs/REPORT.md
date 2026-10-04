@@ -13,6 +13,15 @@ building — each growth stated with its reason (D11–D15).
 | **Deployed URL** | <https://router.kreasiodigital.com> — health: [`/v1/health`](https://router.kreasiodigital.com/v1/health) (`{"status":"ok"}`); self-hosted: Docker + NGINX + Cloudflare TLS per [`DEPLOY.md`](DEPLOY.md) |
 | **Console credentials** | The login page lists the two account emails only (no passwords shown in the app). Passwords, documented here only: `team@demo.local` / `mekari-demo-2026` (product team view) · `admin@demo.local` / `mekari-demo-2026` (adds cross-tenant Observability) |
 
+Companion documents (this report cites each inline; the map is here so the
+set is obvious at a glance):
+
+| doc | what it is | backs these sections |
+|---|---|---|
+| [`DECISIONS.md`](DECISIONS.md) | the decision log, written **before** any code — every defended choice (D1–D16) with its reason and what was rejected | §0 intro, §6 (D11–D15 growth/cut), §9 judgement row, §7 |
+| [`RULES.md`](RULES.md) | routing rationale: every rule, threshold and override, mirroring `routing/rules.ts` | §2 (rules + trade-offs), §8.1 (case table), §9 evidence |
+| [`FLOW.md`](FLOW.md) | one request walked end to end — entry gates, capability branch, routing, fallback, SSE event shapes — with clickable code references | §1 (what was built), §4 (measured behaviour), §5 (failure shapes), §8.2, §9 correctness row |
+
 Where the report's required content lives:
 
 | required by the brief | section |
