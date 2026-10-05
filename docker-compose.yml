@@ -15,6 +15,13 @@ services:
       PORT: "3000"
       CONSOLE_DIST: /app/console/dist
       COOKIE_SECURE: "true" # TLS terminates at nginx/Cloudflare in front
+      # ── Permanent, deliberate: the mock runs in scripted-hang mode. Policy
+      # routing NEVER picks the mock, so this changes nothing for normal
+      # traffic. It arms the on-demand fallback demo: pin the mock first
+      # (RUNBOOK tier-1 — POST with "backendPin":"mock", or the playground's
+      # "fault: on" toggle) and the router's per-chunk timeout (6s) aborts it
+      # into the tier-A fallback. No env change, no restart, no revert.
+      MOCK_FAILURE_MODE: "hang"
     volumes:
       # SQLite (WAL) + kb seed persist across rebuilds. kb.json must exist on
       # the host (npm run build:kb) for a first boot to seed the KB.

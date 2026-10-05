@@ -61,6 +61,18 @@ curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
   -d '{"message":"how do I cancel my order?","backendPin":"openrouter-tier-b"}'
 #   plan[0].backendId = openrouter-tier-b, reason "pinned by request (eval A/B): …"
 
+## A7 & B3 — fallback: the pinned mock hangs → router timeout → tier A rescues
+#   (the deployed box runs MOCK_FAILURE_MODE=hang permanently — the mock is
+#   never picked by policy, so the lever only fires when pinned)
+curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"how do I cancel my order?","backendPin":"mock"}'
+#   ≈6s of scripted stall, then:
+#   meta.routingPlan = [mock failed "…stalled 6000ms… (router timeout)",
+#                       openrouter-tier-a served, openrouter-tier-b skipped],
+#   fallbackTriggered: true; the final TTFT honestly includes the stall
+#   console twin: Playground → "fault: on" toggle → send — the X-ray shows
+#   the timeout → fallback fire live (no curl needed)
+
 ## A6 — unknown backendPin → 400 (validated, never silently ignored)
 curl -s "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
   -d '{"message":"how do I cancel my order?","backendPin":"ghost"}'
@@ -123,16 +135,17 @@ reasons must match what the response just streamed.
 ## Tier 2 — operator scenes (env change → restart → fire → revert)
 
 ```bash
-## A7 & B3 — fallback: mock first, scripted stall → router timeout → tier A
+## A7-variant — chain-order override: mock first for EVERY request
 #   in docker-compose.yml environment add:
 #     ROUTING_CHAIN: "mock,openrouter-tier-a"
-#     MOCK_FAILURE_MODE: "hang"          # or "fail" for the hard-error variant
 docker compose up -d
 curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
   -d '{"message":"how do I cancel my order?"}'
 #   meta.routingPlan = [mock failed "…timeout", openrouter-tier-a served],
-#   fallbackTriggered: true
-#   → then remove both lines and: docker compose up -d
+#   fallbackTriggered: true — WITHOUT any pin, proving the chain override
+#   → remove the line and: docker compose up -d
+#   (the per-request path above — backendPin — is the assessor-facing scene;
+#   this variant only demonstrates the env-level chain reorder)
 
 ## B7 — upstream outage: both real tiers unreachable → 502, never a hang
 #   temporarily set: OPENROUTER_BASE_URL=http://127.0.0.1:9
