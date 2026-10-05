@@ -175,6 +175,11 @@ function SessionChat({
   /** true between the stream's final event and that turn landing in the timeline — the window the live bubble must bridge alone. */
   const [pendingFinal, setPendingFinal] = useState(false);
   const [input, setInput] = useState("");
+  /** The message in flight, kept separately from the composer: `input` clears
+      on send, but the bubble must still show what the caller typed — and on a
+      rejected request (429/401/network) no turn is ever persisted, so this is
+      the only place the text lives. */
+  const [sentInput, setSentInput] = useState("");
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
@@ -247,6 +252,7 @@ function SessionChat({
   async function send(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     if (!input.trim() || busy) return;
+    setSentInput(input); // the bubble outlives the composer: keep the echo before clearing
     setInput(""); // clear immediately — the message lives in the stream now
     setBusy(true);
     setFault(null);
@@ -322,7 +328,7 @@ function SessionChat({
               costUsd: final?.metering?.estimatedCostUsd,
               latencyMs: final?.metering?.latencyMs,
               outcome: fault ? "failed" : final?.refused ? "refused" : "ok",
-              question: input,
+              question: sentInput,
               answer: fault ? null : final?.refused ? final.message ?? null : (final?.answer ?? streamText) || null,
               retrievalConfidence: meta?.retrieval?.confidence ?? null,
               retrieval: meta?.retrieval?.entries ?? null,
@@ -335,7 +341,7 @@ function SessionChat({
           disabled={busy}
         >
           <TwoBubbles
-            q={input}
+            q={sentInput}
             a={final?.refused ? final.message ?? "" : (final?.answer ?? streamText) || null}
             error={fault?.message ?? null}
             refused={final?.refused === true}
