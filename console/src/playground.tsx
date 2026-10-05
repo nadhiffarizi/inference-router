@@ -32,6 +32,9 @@ export type Capability = "assistant" | "chat";
 
 export function Playground(): React.ReactElement {
   const [pastedKey, setPastedKey] = useState<string | null>(() => localStorage.getItem(KEY_STORAGE));
+  // set when a 401 proves the stored key is dead — the gate opens with an
+  // explanation; cleared on any successful reconnect
+  const [invalidKey, setInvalidKey] = useState(false);
   const [capability, setCapability] = useState<Capability>(
     () => (localStorage.getItem("playground.capability") as Capability) ?? "assistant",
   );
@@ -46,13 +49,30 @@ export function Playground(): React.ReactElement {
     const trimmed = key.trim();
     if (!trimmed) return;
     localStorage.setItem(KEY_STORAGE, trimmed);
+    setInvalidKey(false);
     setPastedKey(trimmed);
   }
 
-  if (!pastedKey) {
-    return <ConnectGate keysPresent={keys.keys.length > 0} onIssued={connect} onConnect={connect} error={keys.error} />;
+  /** The gateway rejected the stored key (unknown/not yours): drop the
+      connection so the gate comes back — a bad key must not wedge the chat. */
+  function invalidStoredKey(): void {
+    localStorage.removeItem(KEY_STORAGE);
+    setPastedKey(null);
+    setInvalidKey(true);
   }
-  return <SessionChat apiKey={pastedKey} capability={capability} onCapability={switchCapability} />;
+
+  if (!pastedKey) {
+    return (
+      <ConnectGate
+        keysPresent={keys.keys.length > 0}
+        onIssued={connect}
+        onConnect={connect}
+        error={keys.error}
+        invalidKey={invalidKey}
+      />
+    );
+  }
+  return <SessionChat apiKey={pastedKey} capability={capability} onCapability={switchCapability} onInvalidKey={invalidStoredKey} />;
 }
 
 /** The issue → copy → paste gate (keys are one and irreplaceable). */
@@ -61,11 +81,13 @@ function ConnectGate({
   onIssued,
   onConnect,
   error,
+  invalidKey = false,
 }: {
   keysPresent: boolean;
   onIssued: (key: string) => void;
   onConnect: (key: string) => void;
   error: string | null;
+  invalidKey?: boolean;
 }): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [value, setValue] = useState("");
@@ -87,6 +109,14 @@ function ConnectGate({
       <Card>
         <CardHeader><CardTitle>connect the playground</CardTitle></CardHeader>
         <CardContent className="space-y-4">
+          {invalidKey && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+              The key the playground connected with was <strong>rejected as unknown</strong> — most often it was
+              copied in masked form (<span className="font-mono">sk_…0000</span> on the card is a hint, not a key),
+              or it predates a database reset, or it belongs to another account. Reveal the key on the
+              {" "}API Keys page and paste the full plaintext.
+            </div>
+          )}
           {!keysPresent && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
               Your account has no API key yet — the playground calls the gateway with a key, like a product
@@ -159,8 +189,8 @@ function restoredXray(t: Turn): RestoredXray {
 }
 
 function SessionChat({
-  apiKey, capability, onCapability,
-}: { apiKey: string; capability: Capability; onCapability: (c: Capability) => void }): React.ReactElement {
+  apiKey, capability, onCapability, onInvalidKey,
+}: { apiKey: string; capability: Capability; onCapability: (c: Capability) => void; onInvalidKey?: () => void }): React.ReactElement {
   const [sessions, setSessions] = useState<ChatSessionRow[]>([]);
   const [activeExt, setActiveExt] = useState<string>(
     () => localStorage.getItem(SESSION_STORAGE) ?? crypto.randomUUID(),
@@ -276,7 +306,12 @@ function SessionChat({
             void refresh();
             void loadTurns(activeExt).then(() => setPendingFinal(false));
           },
-          onError: (code, message) => setFault({ code, message }),
+          onError: (code, message) => {
+            setFault({ code, message });
+            // 401 means the stored key is provably dead — drop the connection
+            // and let the connect gate explain; retrying can't succeed
+            if (code === "unauthorized") onInvalidKey?.();
+          },
           onDone: () => undefined,
         },
         controller.signal);
