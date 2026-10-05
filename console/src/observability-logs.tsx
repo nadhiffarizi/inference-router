@@ -14,7 +14,7 @@ import { LatencyChart } from "./components/latency-chart";
 import { RouteChain } from "./components/route-chain";
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
-import { localStamp } from "./lib/time";
+import { localStamp, localDayToIso } from "./lib/time";
 
 /**
  * The "see all" pages behind /observability's top-K tables: same rows, minus
@@ -94,7 +94,7 @@ export function ActivityLogPage(): React.ReactElement {
   const [offset, setOffset] = useState(0);
   const [openTrace, setOpenTrace] = useState<TracePayload | null>(null);
 
-  const url = `/v1/console/observability/activity?${buildQuery({ q, tenant, outcome, capability, from: rangeFrom, to: rangeTo, limit, offset })}`;
+  const url = `/v1/console/observability/activity?${buildQuery({ q, tenant, outcome, capability, from: localDayToIso(rangeFrom, "start"), to: localDayToIso(rangeTo, "end"), limit, offset })}`;
   // any filter change collapses back to page one
   useEffect(() => setOffset(0), [q, tenant, outcome, capability, rangeFrom, rangeTo, limit]);
   const { data, error, loading } = useApiList<Paged<ActivityRow>>(url);
@@ -108,9 +108,9 @@ export function ActivityLogPage(): React.ReactElement {
           { key: "tokens", label: "tokens" },
           { key: "costUsd", label: "cost" },
         ]}
-        filters={{ q, tenant, outcome, capability, from: rangeFrom, to: rangeTo }}
+        filters={{ q, tenant, outcome, capability, from: localDayToIso(rangeFrom, "start"), to: localDayToIso(rangeTo, "end") }}
       />
-      <LatencyChart filters={{ q, tenant, outcome, capability, from: rangeFrom, to: rangeTo }} />
+      <LatencyChart filters={{ q, tenant, outcome, capability, from: localDayToIso(rangeFrom, "start"), to: localDayToIso(rangeTo, "end") }} />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={qInput} onChange={setQInput} placeholder="question, request id, model, key…" />
@@ -206,7 +206,7 @@ export function SessionsLogPage(): React.ReactElement {
   const [offset, setOffset] = useState(0);
   const [openUid, setOpenUid] = useState<number | null>(null);
 
-  const url = `/v1/console/observability/sessions?${buildQuery({ q, tenant, state, from: rangeFrom, to: rangeTo, limit, offset })}`;
+  const url = `/v1/console/observability/sessions?${buildQuery({ q, tenant, state, from: localDayToIso(rangeFrom, "start"), to: localDayToIso(rangeTo, "end"), limit, offset })}`;
   useEffect(() => setOffset(0), [q, tenant, state, rangeFrom, rangeTo, limit]);
   const { data, error, loading } = useApiList<Paged<SessionRow>>(url);
 
@@ -215,7 +215,7 @@ export function SessionsLogPage(): React.ReactElement {
       <LogChart
         domain="sessions"
         metrics={[{ key: "sessions", label: "created" }]}
-        filters={{ q, tenant, state, from: rangeFrom, to: rangeTo }}
+        filters={{ q, tenant, state, from: localDayToIso(rangeFrom, "start"), to: localDayToIso(rangeTo, "end") }}
         note={rangeFrom || rangeTo ? "sessions created in the picked range" : "sessions created, by creation time"}
       />
       <Card className="p-3">
@@ -301,7 +301,7 @@ export function DecisionsLogPage(): React.ReactElement {
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [offset, setOffset] = useState(0);
 
-  const url = `/v1/console/observability/decisions?${buildQuery({ q, tenant, capability, fallback, from: rangeFrom, to: rangeTo, limit, offset })}`;
+  const url = `/v1/console/observability/decisions?${buildQuery({ q, tenant, capability, fallback, from: localDayToIso(rangeFrom, "start"), to: localDayToIso(rangeTo, "end"), limit, offset })}`;
   useEffect(() => setOffset(0), [q, tenant, capability, fallback, rangeFrom, rangeTo, limit]);
   const { data, error, loading } = useApiList<Paged<DecisionRow>>(url);
 
@@ -313,7 +313,7 @@ export function DecisionsLogPage(): React.ReactElement {
           { key: "requests", label: "decisions" },
           { key: "fallbacks", label: "fallbacks" },
         ]}
-        filters={{ q, tenant, capability, fallback, from: rangeFrom, to: rangeTo }}
+        filters={{ q, tenant, capability, fallback, from: localDayToIso(rangeFrom, "start"), to: localDayToIso(rangeTo, "end") }}
       />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">

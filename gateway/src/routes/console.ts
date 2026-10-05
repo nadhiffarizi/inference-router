@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql, type SQLWrapper } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql, type SQLWrapper } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { db } from "../db/index.js";
@@ -158,25 +158,46 @@ function pageParams(req: FastifyRequest): PageParams {
 }
 
 /**
- * Day-range filter (the observability pages' date pickers): `from`/`to` as
- * YYYY-MM-DD in UTC — timestamps are stored as UTC ISO text, so the inclusive
- * day range is two string-slice comparisons, no parsing. A malformed value is
- * ignored rather than 400ing — a query param is a view preference, not data
- * the caller depends on.
+ * Range filter for the observability pages' date pickers. Two accepted wire
+ * forms, normalized to ONE thing: an inclusive instant range (gte/lte on the
+ * stored UTC ISO text — created_at is `toISOString()`, so lexicographic order
+ * is chronological order):
+ *   - `YYYY-MM-DD`        → that UTC day (Postman/API convenience)
+ *   - full ISO instant    → the exact bound (the console sends viewer-local
+ *                           day edges converted to UTC: local midnight /
+ *                           end-of-day), so a picked range matches the day
+ *                           labels the rows are stamped with in the viewer's
+ *                           timezone — a UTC-day filter and a Jakarta viewer
+ *                           disagree by 7 hours exactly at the day seam, which
+ *                           is the bug this replaces.
+ * A malformed value is ignored rather than 400ing — a query param is a view
+ * preference, not data the caller depends on.
  */
-function dayRangeParams(p: { from?: string; to?: string }): { from: string | undefined; to: string | undefined } {
-  const DATE = /^\d{4}-\d{2}-\d{2}$/;
-  const from = DATE.test(p.from?.trim() ?? "") ? p.from!.trim() : undefined;
-  const to = DATE.test(p.to?.trim() ?? "") ? p.to!.trim() : undefined;
-  if (from && to && from > to) return { from: to, to: from }; // swapped pickers read as intended, not as empty
-  return { from, to };
+type RangeSpec = { from: string | undefined; to: string | undefined; kind: "day" | "instant" };
+
+function dayRangeParams(p: { from?: string; to?: string }): RangeSpec {
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const asInstant = (v: string | undefined, end: boolean): string | undefined => {
+    if (!v) return undefined;
+    if (ISO.test(v)) return v;
+    if (DAY.test(v)) return `${v}T${end ? "23:59:59.999" : "00:00:00.000"}Z`;
+    return undefined;
+  };
+  const rawFrom = p.from?.trim();
+  const rawTo = p.to?.trim();
+  let from = asInstant(rawFrom, false);
+  let to = asInstant(rawTo, true);
+  if (from && to && from > to) [from, to] = [to, from]; // swapped pickers read as intended, not as empty
+  const kind: RangeSpec["kind"] =
+    ISO.test(rawFrom ?? "") || ISO.test(rawTo ?? "") ? "instant" : "day";
+  return { from, to, kind };
 }
 
-function dayRangeConditions(col: AnySQLiteColumn, range: { from: string | undefined; to: string | undefined }): SQLWrapper[] {
-  const day = sql<string>`substr(${col}, 1, 10)`;
-  if (range.from && range.to) return [sql`${day} >= ${range.from}`, sql`${day} <= ${range.to}`];
-  if (range.from) return [sql`${day} >= ${range.from}`];
-  if (range.to) return [sql`${day} <= ${range.to}`];
+function dayRangeConditions(col: AnySQLiteColumn, range: RangeSpec): SQLWrapper[] {
+  if (range.from && range.to) return [gte(col, range.from), lte(col, range.to)];
+  if (range.from) return [gte(col, range.from)];
+  if (range.to) return [lte(col, range.to)];
   return [];
 }
 
@@ -657,27 +678,41 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     }
 
     // time domains
-    /** Bucket geometry: the window presets are relative to now; an explicit
-        from/to day range (the pages' date pickers) wins and is anchored to
-        its own day boundaries — hourly if the span is ≤ 2 days, else daily. */
+    /** Bucket geometry. The window presets are relative to now. An explicit
+        range (the pages' date pickers, sent as viewer-local day edges in UTC
+        ISO) wins and is anchored to its own bounds — hourly while the span
+        is ≤ 48h, daily beyond. Daily buckets still enumerate on UTC day
+        boundaries (the storage/query convention, D16); the row-level range
+        conditions above carry the viewer-local precision, so a bucket is a
+        rendering aggregate, not the filter. */
     const range = dayRangeParams(p);
     const explicit = range.from !== undefined || range.to !== undefined;
-    const stepMs = explicit
-      ? (Date.parse(`${range.to ?? range.from}T00:00:00Z`) - Date.parse(`${range.from ?? range.to}T00:00:00Z`)) / 86_400_000 <= 2 ? 3_600_000 : 86_400_000
-      : window === "30d" ? 86_400_000 : 3_600_000;
+    // dayRangeParams guarantees at least one bound when explicit; TS can't
+    const lo = range.from ?? range.to!;
+    const hi = range.to ?? range.from!;
+    const spanMs = explicit ? Date.parse(hi) - Date.parse(lo) : -1;
+    const stepMs = explicit ? (spanMs <= 48 * 3_600_000 ? 3_600_000 : 86_400_000) : window === "30d" ? 86_400_000 : 3_600_000;
     const bucketLen = stepMs === 86_400_000 ? 10 : 13; // YYYY-MM-DD | YYYY-MM-DDTHH
-    const startMs = explicit
-      ? Date.parse(`${range.from ?? range.to}T00:00:00Z`)
-      : Date.now() - (stepMs === 86_400_000 ? 29 * stepMs : 23 * stepMs);
-    const endMs = explicit ? Date.parse(`${range.to ?? range.from}${bucketLen === 13 ? "T23:00:00Z" : "T00:00:00Z"}`) : Date.now();
+    const now = Date.now();
+    const startMs = explicit ? Date.parse(lo) : now - (stepMs === 86_400_000 ? 29 * stepMs : 23 * stepMs);
+    const endMs = explicit ? Date.parse(hi) : now;
     const buckets: string[] = [];
-    for (let t = startMs; t <= endMs; t += stepMs) {
+    // daily explicit ranges align the first bucket to a UTC day boundary;
+    // window presets keep their now-relative starts (unchanged behavior)
+    const firstT = explicit && bucketLen === 10 ? startMs - (startMs % stepMs) : startMs;
+    for (let t = firstT; t <= endMs; t += stepMs) {
       buckets.push(new Date(t).toISOString().slice(0, bucketLen));
     }
-    const from = buckets[0]!;
+    // row filter: instant ranges carry both bounds precisely; the window
+    // presets keep the prefix-compare form (from the first bucket)
+    const from = explicit && range.from ? range.from : buckets[0]!;
+    const toInstant = explicit && range.to ? range.to : undefined;
+    /** The window presets end at "now" (no rows exist beyond it), so they
+        never needed an upper bound — a picked past range does. */
+    const upperBound = (col: AnySQLiteColumn): SQLWrapper[] => (toInstant ? [lte(col, toInstant)] : []);
 
     if (domain === "sessions") {
-      const conditions = [tenantIn(chatSessions.tenantId), gte(chatSessions.createdAt, from)];
+      const conditions = [tenantIn(chatSessions.tenantId), gte(chatSessions.createdAt, from), ...upperBound(chatSessions.createdAt)];
       if (p.state === "active") conditions.push(isNull(chatSessions.deletedAt));
       if (p.state === "deleted") conditions.push(isNotNull(chatSessions.deletedAt));
       if (p.q?.trim()) {
@@ -695,7 +730,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     }
 
     if (domain === "decisions") {
-      const conditions = [tenantIn(routingDecisions.tenantId), gte(routingDecisions.createdAt, from)];
+      const conditions = [tenantIn(routingDecisions.tenantId), gte(routingDecisions.createdAt, from), ...upperBound(routingDecisions.createdAt)];
       if (p.capability?.trim()) conditions.push(eq(routingDecisions.capability, p.capability.trim()));
       if (p.fallback === "fired") conditions.push(eq(routingDecisions.fallbackTriggered, true));
       if (p.fallback === "quiet") conditions.push(eq(routingDecisions.fallbackTriggered, false));
@@ -718,7 +753,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     }
 
     // turns (the activity domain — also the home chart)
-    const conditions = [tenantIn(requests.tenantId), gte(requests.createdAt, from)];
+    const conditions = [tenantIn(requests.tenantId), gte(requests.createdAt, from), ...upperBound(requests.createdAt)];
     if (p.outcome?.trim()) conditions.push(eq(requests.outcome, p.outcome.trim()));
     if (p.capability?.trim()) conditions.push(eq(requests.capability, p.capability.trim()));
     if (p.q?.trim()) {

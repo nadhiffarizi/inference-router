@@ -48,6 +48,17 @@ export function localDay(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** A calendar day picked by the viewer → the UTC instant range that covers
+    their local day, so a date-range filter matches the day labels the table
+    stamps (both computed in viewer time, then sent as ISO). "start" = local
+    midnight, "end" = local 23:59:59.999. Empty value → "" (unbounded). */
+export function localDayToIso(day: string, edge: "start" | "end"): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "";
+  const d = new Date(`${day}T00:00:00`); // no Z — parsed as the viewer's local day
+  if (edge === "end") d.setHours(23, 59, 59, 999);
+  return d.toISOString();
+}
+
 /** Parse a series bucket — the server groups on UTC ISO prefixes, so the raw
     prefix has no zone. Only exact prefixes the endpoint actually emits are
     expected here; anything else renders as the raw string. */
