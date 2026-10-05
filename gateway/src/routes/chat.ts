@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { errorBody } from "../lib/errors.js";
+import { errorBody, errors } from "../lib/errors.js";
 import { bumpQuota, readUsage } from "../lib/quota.js";
 import { recordRequest, recordRoutingDecision } from "../lib/metering.js";
 import { openSse, writeEvent, closeSse } from "../lib/sse.js";
@@ -20,6 +20,10 @@ const BodySchema = {
     message: { type: "string", minLength: 1, maxLength: 8000 },
     maxTokens: { type: "integer", minimum: 16, maximum: 2000, default: 700 },
     sessionId: { type: "string", maxLength: 100 },
+    /** Eval/debug pin — same affordance and validation as the assistant
+        route: force this backend first in the plan (e.g. "mock" to watch the
+        router timeout → fallback fire). */
+    backendPin: { type: "string" },
   },
   additionalProperties: false,
 } as const;
@@ -36,7 +40,7 @@ export function registerChatRoute(
   systemPrompt: string,
 ): void {
   app.post<{
-    Body: { message: string; maxTokens?: number; sessionId?: string };
+    Body: { message: string; maxTokens?: number; sessionId?: string; backendPin?: string };
   }>(
     "/v1/chat",
     {
@@ -49,7 +53,17 @@ export function registerChatRoute(
       const started = Date.now();
       const chatSession = await resolveOrCreateSession(tenant.id, req.body.sessionId, req.body.message);
 
-      const routeCtx: RouteContext = { capability: "chat", question: req.body.message };
+      // A caller-supplied pin must name a real backend — same contract as the
+      // assistant route: silent-ignore would route by policy while the caller
+      // believes the pin is in force.
+      if (req.body.backendPin && !byId.has(req.body.backendPin)) {
+        throw errors.invalidInput(`unknown backendPin "${req.body.backendPin}"`, { allowed: [...byId.keys()] });
+      }
+      const routeCtx: RouteContext = {
+        capability: "chat",
+        question: req.body.message,
+        pinBackendId: req.body.backendPin,
+      };
       const plan = buildRoutePlan(routeCtx, byId);
 
       const streamReq: StreamRequest = {

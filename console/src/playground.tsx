@@ -212,7 +212,8 @@ function SessionChat({
   const [busy, setBusy] = useState(false);
   /** Demo lever: pin the scripted mock first (mock runs in hang mode) so the
       router timeout → fallback fires on demand, in the UI, with zero env
-      changes or restarts. Assistant-only — the chat schema has no pin. */
+      changes or restarts. Works in both capabilities — /v1/chat accepts the
+      same validated backendPin as the assistant route. */
   const [demoFault, setDemoFault] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
@@ -300,7 +301,7 @@ function SessionChat({
         capability === "chat" ? "/v1/chat" : "/v1/support-assistant",
         { message: input, sessionId: activeExt,
           ...(capability === "chat" ? { maxTokens: 500 } : {}),
-          ...(capability === "assistant" && demoFault ? { backendPin: "mock" } : {}) },
+          ...(demoFault ? { backendPin: "mock" } : {}) },
         apiKey,
         {
           onMeta: setMeta,
@@ -446,19 +447,17 @@ function SessionChat({
           >
             <MessageSquareText className="size-3" /> chat
           </Button>
-          {capability === "assistant" && (
-            <Button
-              type="button" size="sm"
-              variant={demoFault ? "destructive" : "ghost"}
-              className="h-7 rounded-full px-2.5 text-xs"
-              onClick={() => setDemoFault((v) => !v)}
-              title={demoFault
-                ? "demo fault ON — the failing mock is pinned first: router timeout → fallback fires"
-                : "demo fault off — pin the failing mock first to watch timeout → fallback fire (assistant mode)"}
-            >
-              <CircleSlash className="size-3" /> {demoFault ? "fault: on" : "fault: off"}
-            </Button>
-          )}
+          <Button
+            type="button" size="sm"
+            variant={demoFault ? "destructive" : "ghost"}
+            className="h-7 rounded-full px-2.5 text-xs"
+            onClick={() => setDemoFault((v) => !v)}
+            title={demoFault
+              ? "demo fault ON — the failing mock is pinned first: router timeout → fallback fires"
+              : "demo fault off — pin the failing mock first to watch timeout → fallback fire"}
+          >
+            <CircleSlash className="size-3" /> {demoFault ? "fault: on" : "fault: off"}
+          </Button>
         </div>
         <div className="flex items-center gap-1">
           <Button type="button" variant="ghost" size="icon" onClick={() => void newSession()} title="new session" className="size-7 text-muted-foreground hidden sm:inline-flex">

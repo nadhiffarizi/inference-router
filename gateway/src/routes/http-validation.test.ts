@@ -36,6 +36,7 @@ const { bootstrapDatabase, db } = await import("../db/index.js");
 const { tenants, apiKeys, requests, routingDecisions } = await import("../db/schema.js");
 const { authenticate } = await import("../plugins/auth.js");
 const { registerAssistantRoute } = await import("./assistant.js");
+const { registerChatRoute } = await import("./chat.js");
 const { GatewayError, errorBody } = await import("../lib/errors.js");
 const { loadKb } = await import("../rag/kb.js");
 const { eq } = await import("drizzle-orm");
@@ -76,7 +77,17 @@ app.setErrorHandler((err: unknown, _req, reply) => {
   }
   reply.status(500).send(errorBody("internal", "internal error"));
 });
-registerAssistantRoute(app, new Map()); // empty registry: any reachable dispatch would fail loudly
+/** Stubs named exactly like production backends (only used for the
+    allowed-ids list and pin validation; any real dispatch here would hang,
+    which tests must never do). */
+const stubAdapters = new Map(
+  ["openrouter-tier-a", "openrouter-tier-b", "mock"].map((id) => [id, {
+    meta: { id, label: id, modelId: `${id}/stub`, tier: id === "mock" ? "mock" : id.endsWith("a") ? "a" : "b", timeoutMs: 50, pricePerMTokens: { input: 0, output: 0 } },
+    async *stream(): AsyncGenerator<never, void, unknown> { await new Promise(() => {}); },
+  } as never]),
+);
+registerAssistantRoute(app, stubAdapters);
+registerChatRoute(app, stubAdapters, "test system prompt");
 app.addHook("onRequest", authenticate);
 
 const AUTH = { authorization: `Bearer ${KEY}` };
@@ -119,6 +130,18 @@ test("auth: missing header → 401", async () => {
   const res = await inject({ message: "hi" }, {});
   assert.equal(res.statusCode, 401);
   assert.equal(res.json<{ error: { code: string } }>().error.code, "unauthorized");
+});
+
+test("chat: unknown backendPin → 400 with allowed ids (same contract as the assistant route)", async () => {
+  const res = await app.inject({
+    method: "POST", url: "/v1/chat", headers: AUTH,
+    payload: { message: "hi", backendPin: "ghost" },
+  });
+  assert.equal(res.statusCode, 400);
+  const body = res.json<{ error: { code: string; message: string; details?: { allowed?: string[] } } }>();
+  assert.equal(body.error.code, "invalid_input");
+  assert.match(body.error.message, /unknown backendPin "ghost"/);
+  assert.deepEqual(body.error.details?.allowed, ["openrouter-tier-a", "openrouter-tier-b", "mock"]);
 });
 
 test("valid request through the whole path: refusal stream, SSE events, metering row written", async () => {
