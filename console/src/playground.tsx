@@ -21,8 +21,7 @@ import { RouteChain } from "./components/route-chain";
  * assistant stays single-turn by design.
  */
 
-const KEY_STORAGE = "playground.key";
-const SESSION_STORAGE = "playground.sessionExternalId";
+import { PLAYGROUND_KEY_STORAGE as KEY_STORAGE, PLAYGROUND_SESSION_STORAGE as SESSION_STORAGE } from "./auth";
 
 type Fault = { code: string; message: string };
 
