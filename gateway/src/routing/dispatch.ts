@@ -80,7 +80,16 @@ export async function openWithFallback(plan: Candidate[], streamReq: StreamReque
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
       steps.push({ backendId: cand.adapter.meta.id, action: "failed", reason: lastError });
-      await iter.return?.().catch(() => undefined); // finalize the abandoned generator
+      // Finalize the abandoned generator — but BOUNDED: a generator suspended
+      // on an await that never settles (a hung upstream) cannot accept the
+      // return completion until its await resolves, and awaiting that without
+      // a cap hung the whole dispatch loop — and the response — forever. 1s
+      // covers a normal unwind; a stuck return() is left to settle (or GC)
+      // while the fallback proceeds.
+      await Promise.race([
+        iter.return?.().catch(() => undefined) ?? Promise.resolve(),
+        new Promise((r) => setTimeout(r, 1_000)),
+      ]);
     }
   }
   return { ok: false, lastError, steps };
@@ -109,8 +118,14 @@ async function nextWithTimeout(
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${backendId} stalled ${timeoutMs}ms between chunks (router timeout)`)), timeoutMs);
   });
+  // The race may abandon iter.next() — when the timeout wins and the pending
+  // step later REJECTS (abort, body error), that rejection must be marked
+  // handled or Node's default unhandled-rejection policy kills the process.
+  // A side-chain handler marks it without touching what the race sees.
+  const next = iter.next();
+  next.catch(() => undefined);
   try {
-    return await Promise.race([iter.next(), timeout]);
+    return await Promise.race([next, timeout]);
   } finally {
     clearTimeout(timer);
   }

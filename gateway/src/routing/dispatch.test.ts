@@ -96,6 +96,38 @@ test("first backend that completes with no delta is abandoned — the next candi
   assert.deepEqual(received.map((e) => (e.type === "delta" ? deltaText(e) : `done:${e.usage.completionTokens}`)), ["an answer", "done:2"]);
 });
 
+/** A generator suspended on an await that never settles — the true "hang"
+    shape (a bare sleep() with no budget). iter.return() can never complete
+    against it; regression for the live-found deadlock. */
+function hungForever(tier: AdapterMeta["tier"]): ModelAdapter {
+  const m = meta("hung", tier);
+  return {
+    meta: m,
+    async *stream(): AsyncGenerator<StreamEvent, void, unknown> {
+      await new Promise(() => {
+        /* never settles — not even on abort */
+      });
+      yield { type: "delta", text: "unreachable" };
+      yield { type: "done", usage: usage() };
+    },
+  };
+}
+
+test("a generator that NEVER settles is failed and fallen back without deadlocking", async () => {
+  const outcome = await openWithFallback(
+    [
+      { adapter: hungForever("mock"), reason: "head" },
+      { adapter: scripted("a", [{ type: "delta", text: "rescued" }, { type: "done", usage: usage() }]), reason: "next" },
+    ],
+    { messages: [], maxTokens: 10 },
+  );
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+  assert.equal(outcome.fallbackTriggered, true);
+  assert.deepEqual(outcome.steps.map((s) => s.action), ["failed", "served"]);
+  assert.match(outcome.steps[0]!.reason, /stalled .* \(router timeout\)/);
+});
+
 test("upstream throw → failed step + fallback to the next candidate", async () => {
   const outcome = await openWithFallback(
     [

@@ -32,8 +32,16 @@ export function makeMockAdapter(meta: AdapterMeta): ModelAdapter {
       }
 
       if (cfg.failureMode === "hang") {
-        // Never yields — the adapter-level timeout must abort this.
-        await sleep(999_999);
+        // Never yields — and never settles on its own, ON PURPOSE. The adapter
+        // contract (same as openrouter.ts's TTFB abort) is to unwind at the
+        // timeout budget and throw, so the router can catch and finalize the
+        // generator. A bare non-abortable sleep() here is poison: dispatch's
+        // router guard fires its 6s rejection, but iter.return() can't deliver
+        // a return completion to a generator suspended on an await that never
+        // settles — verified live, the whole SSE response hung past 125s.
+        await new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`${meta.id} hung (scripted) — past its ${meta.timeoutMs}ms TTFB budget`)), meta.timeoutMs),
+        );
         return; // unreachable, satisfies the generator contract
       }
 
