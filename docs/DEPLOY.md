@@ -35,16 +35,28 @@ curl http://127.0.0.1:4000/v1/health     # {"status":"ok"}
 
 ## 3. NGINX
 
-The rule ships in the repo:
+The vhost is **not shipped in the repo** — it names this box's domain and the
+Cloudflare ranges it trusts, which is deployment topology, not source. Write
+it on the server (or version it privately); the repo-relevant contract is its
+behaviour:
 
 ```bash
-sudo cp nginx/router.kreasiodigital.com.conf /etc/nginx/sites-available/
-sudo ln -sf /etc/nginx/sites-available/router.kreasiodigital.com /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-It proxies *everything* to `127.0.0.1:4000` with `proxy_buffering off` (SSE must
-not buffer) and `proxy_read_timeout 300s`. TLS: run
+What the vhost does (reproduce this on your box):
+
+- `location / { proxy_pass http://127.0.0.1:4000; ... }` — proxies
+  *everything* (console and API, one origin) to the compose map's host port.
+- `proxy_buffering off` and `proxy_cache off` — SSE must stream, or answers
+  arrive in bursts (the gateway also sends `x-accel-buffering: no`).
+- `proxy_read_timeout 300s` — tier-B streams can outlast a page request.
+- `client_max_body_size 2m` — the gateway's own limit is stricter (1 MiB).
+- Behind Cloudflare: restore the real client IP from `CF-Connecting-IP`
+  (`set_real_ip_from` + Cloudflare's published ranges) so the logs aren't all
+  Cloudflare edge IPs.
+
+TLS: run
 
 ```bash
 sudo certbot --nginx -d router.kreasiodigital.com

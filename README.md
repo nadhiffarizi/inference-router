@@ -109,6 +109,8 @@ MOCK_FAILURE_MODE=hang   # exercises the stall → per-chunk router timeout → 
 ## Deploy
 
 Self-hosted: Docker (one container: gateway + console, host port 4000) behind
-NGINX — runbook in [`docs/DEPLOY.md`](docs/DEPLOY.md); the nginx rule ships in
-[`nginx/router.kreasiodigital.com.conf`](nginx/router.kreasiodigital.com.conf).
+NGINX — runbook in [`docs/DEPLOY.md`](docs/DEPLOY.md); the vhost's behaviour
+contract is described there and the rule itself lives on the server, not in
+the repo (it names the box's domain and trusted proxy ranges — deployment
+topology, not source).
 Live at **https://router.kreasiodigital.com**.
