@@ -1,5 +1,17 @@
 # Technical Report — Mini Inference Router
 
+**TL;DR — one container, measured.** A streaming gateway (bearer-key auth →
+fail-closed quota → rule-based routing → per-request metering) carrying one
+capability, a support assistant (lexical retrieval over Bitext, calibrated
+refusal), served by one Fastify process that also serves the React console.
+Three backends — two real OpenRouter tiers + a scripted-failure mock — with
+one confidence signal making two decisions (refuse below 0.48, capable-tier
+swap below 0.55). Measured on 30 held-out cases through the real request
+path: tier A = 87% intent, ~506 ms, $0.0038/30 cases; tier B = 87% intent,
++0.73 groundedness, 3× latency and 11.6× cost — so tier A carries the bulk
+and tier B takes weak-retrieval/complex turns. Everything here is
+re-runnable: `npm run eval`, and [`RUNBOOK.md`](RUNBOOK.md)'s curl suite.
+
 Brief for the assessors: the decision log ([`DECISIONS.md`](DECISIONS.md)) was
 written **before** any code; this report records what was measured afterwards,
 where the numbers changed my mind, and where scope grew deliberately while
@@ -9,47 +21,22 @@ building — each growth stated with its reason (D11–D15).
 
 | deliverable                                        | value                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **GitHub repository** (source + all documentation) | <https://github.com/nadhiffarizi/inference-router> — docs live in [`docs/`](.): this report, [`DECISIONS.md`](DECISIONS.md) (decisions argued before code), [`RULES.md`](RULES.md) (routing rationale), [`FLOW.md`](FLOW.md) (request path + failure shapes), [`EVALUATION.md`](EVALUATION.md) (measured A/B), [`DEPLOY.md`](DEPLOY.md) (runbook), [`demo.postman_collection.json`](demo.postman_collection.json) (the case set of sections 8 and 10, importable) |
+| **GitHub repository** (source + all documentation) | <https://github.com/nadhiffarizi/inference-router> — docs live in [`docs/`](.): this report, [`DECISIONS.md`](DECISIONS.md) (decisions argued before code), [`RULES.md`](RULES.md) (routing rationale), [`FLOW.md`](FLOW.md) (request path + failure shapes), [`EVALUATION.md`](EVALUATION.md) (measured A/B), [`DEPLOY.md`](DEPLOY.md) (deploy runbook), [`demo.postman_collection.json`](demo.postman_collection.json) (the section-8 case set, importable) |
 | **Deployed URL**                                   | <https://router.kreasiodigital.com> — health: [`/v1/health`](https://router.kreasiodigital.com/v1/health) (`{"status":"ok"}`); self-hosted: Docker + NGINX + Cloudflare TLS per [`DEPLOY.md`](DEPLOY.md)                                                                                                                                                                                                                                                          |
 | **Console credentials**                            | The login page lists the account emails only (no passwords shown in the app). Passwords, documented here only: `team@demo.local` / `mekari-demo-2026` (product team view) · `admin@demo.local` / `mekari-demo-2026` (adds cross-tenant Observability) · `zero@demo.local` / `mekari-demo-2026` (product view on the `quota-zero` tenant — its Playground 429s on the first message)                                                                               |
 
-Companion documents (this report cites each inline; the map is here so the
-set is obvious at a glance):
+The rest of [`docs/`](.) — one authoritative home per topic; this report
+cites what it needs inline, and the map below is the whole set:
 
-| doc                            | what it is                                                                                                                           | backs these sections                                                                                                                                                     |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`DECISIONS.md`](DECISIONS.md) | the decision log, written **before** any code — every defended choice (D1–D19) with its reason and what was rejected                 | section 0 intro, section 6 (D11–D15 growth/cut), section 9 judgement row, section 7                                                                                      |
-| [`RULES.md`](RULES.md)         | routing rationale: every rule, threshold and override, mirroring `routing/rules.ts`                                                  | section 2 (rules + trade-offs), section 8.1 (case table), section 9 evidence                                                                                             |
-| [`FLOW.md`](FLOW.md)           | one request walked end to end — entry gates, capability branch, routing, fallback, SSE event shapes — with clickable code references | section 5 (the condensed walk lives in the report; the doc has the full line-referenced version), section 4 (measured behaviour), section 8.2, section 9 correctness row |
-
-Decision index — every `D<n>` cited in this report resolves to one of these
-entries in [`DECISIONS.md`](DECISIONS.md) (D1–D10 wrote before code; D11–D19
-are the building addendum):
-
-| id  | decision                                                     | id  | decision                                                      |
-| --- | ------------------------------------------------------------ | --- | ------------------------------------------------------------- |
-| D1  | one system, not microservice sprawl                          | D11 | console accounts: admin _is_ a tenant; session cookie, no JWT |
-| D2  | Node.js + TypeScript; Fastify for the gateway                | D12 | one account, one named key; keys are irreplaceable            |
-| D3  | console: static React (Vite), gateway separate               | D13 | quota currency is USD                                         |
-| D4  | one adapter interface; OpenRouter provider; 3 backends       | D14 | activity feed + trace viewer (Langfuse-mini)                  |
-| D5  | per-request routing rules; every decision recorded           | D15 | chat sessions: grouping, never memory                         |
-| D6  | storage: SQLite via Drizzle ORM                              | D16 | UTC in storage and query; viewer's clock at render            |
-| D7  | retrieval: in-process lexical (MiniSearch), not embeddings   | D17 | p95 latency chart, target-line first                          |
-| D8  | eval: 30 held-out cases, exact-match intent, layered quality | D18 | streaming shape: TTFT measured, TPOT/tokens-per-s derived     |
-| D9  | deploy: self-hosted behind NGINX + Cloudflare                | D19 | TTFT is the default latency chart; round-trip stays a toggle  |
-| D10 | scope cuts declared up front (section 6 carries them)        |     |                                                               |
-
-Where the report's required content lives:
-
-| required by the brief                                  | section                                                                                                                                                           |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| routing rules                                          | section 2 (rules + measured trade-offs), full rationale in [`RULES.md`](RULES.md)                                                                                 |
-| model choices                                          | section 2 (tier table with measured latency/cost), adapter seam in sections 1 and 5, decision D4                                                                  |
-| retrieval choices                                      | section 3 (lexical by design, floor calibrated from probe data), decision D7                                                                                      |
-| how it was evaluated                                   | section 4 (30 held-out cases through the real request path, LLM-judged), per-case detail in [`EVALUATION.md`](EVALUATION.md)                                      |
-| trade-offs accepted                                    | section 4 (the 11.6×-cost read line), section 6 (cut vs deliberately grown), section 7 (limitations, said plainly), section 8.2 (what the demo set drops and why) |
-| the request path (which functions run, in which order) | section 5 (stage-by-stage walkthrough + the complete failure map), expanded with code references in [`FLOW.md`](FLOW.md)                                          |
-| how to verify it live                                  | section 10 (payload-level runbook, every tier-1 case fired live)                                                                                                  |
+| doc | what it is |
+| --- | --- |
+| [`DECISIONS.md`](DECISIONS.md) | the decision log, written **before** any code — D1–D19, each with its reason and what was rejected (index table at its top) |
+| [`RULES.md`](RULES.md) | routing rationale: every rule, threshold and override, mirroring `routing/rules.ts` |
+| [`FLOW.md`](FLOW.md) | one request walked end to end — entry gates, routing, fallback, SSE shapes, line-referenced |
+| [`EVALUATION.md`](EVALUATION.md) | the measured A/B, per case |
+| [`RUNBOOK.md`](RUNBOOK.md) | payload-level curl/Postman runbook for every case in section 8 (formerly this report's §10) |
+| [`DEPLOY.md`](DEPLOY.md) | deploy runbook (Docker + NGINX + Cloudflare) |
+| [`demo.postman_collection.json`](demo.postman_collection.json) | the section-8 case set, importable |
 
 ## 1. What was built
 
@@ -69,13 +56,7 @@ API Keys · Usage`; admin is a tenant like any other plus one extra menu,
    `Observability`: fleet usage, per-key breakdown, the activity feed
    (openrouter-style: one row per gateway call), and trace/session viewers
    (Langfuse-style: question, answer, retrieval, routing plan, metering per
-   turn), all from stored turn traces. The Playground chat keeps the message
-   stream and the composer inside one shared padded column, so every bubble
-   edge lines up with the textarea's edges (user right-aligned to the input
-   box's right edge, assistant flushed with its left) on both the desktop
-   three-panel layout and the mobile single column; the composer itself
-   carries no horizontal chrome that could offset the input box from the
-   transcript.
+   turn), all from stored turn traces.
 4. **Eval harness** (`eval/` workspace, D8) — 30 held-out Bitext cases fired
    through the _real_ gateway path (`POST /v1/support-assistant`, backend
    pinned via `body.backendPin` so auth, quota and metering are exercised, not
@@ -85,7 +66,7 @@ API Keys · Usage`; admin is a tenant like any other plus one extra menu,
    [`EVALUATION.md`](EVALUATION.md)); raw per-case results — every answer,
    confidence, token count, failure and judge comment — land in
    `eval/results/`. There is no separate test endpoint: the harness drives the
-   same routes a product team would (section 10 covers the single-request
+   same routes a product team would ([`RUNBOOK.md`](RUNBOOK.md) covers the single-request
    equivalents).
 
 ## 2. Routing: the rules and why
@@ -399,7 +380,7 @@ in; the mock is never picked by policy (only via 5/7).
 | complexity boundary, 240 vs 241 chars                         | the boundary IS the rule shown by A1 vs A2 — a third request one character longer adds a scene without adding a failure shape; substring/case semantics cited from code (`rules.ts` `questionComplexity`)                                                                                                                                   | A1/A2 pair; boundary constants quoted                                                                                                                                                                                      |
 | mid-stream fault (error after first byte)                     | no on-demand trigger exists: the mock can only fail _before_ first byte, and real provider faults aren't scriptable to a scene; would need a mock `midstream` mode (env-only today) — rejected to keep the demo zero-new-code                                                                                                               | the boundary is documented and code-pinned (`routing/dispatch.ts` `guardedStream` — error event, never re-routing/splice) and the SSE shapes are in `FLOW.md`                                                              |
 | unusable output (answer < 15 chars after trim)                | **dropped — not demoable**: there is no per-request trigger; the assistant's output cap is server-fixed (500 tokens) with a grounding prompt that demands 2–5 sentences, and the mock answers long — a request cannot honestly be made to fail this way (a mock `short` mode would make it on-demand and is the one candidate to add later) | the guard is code-pinned (`routes/assistant.ts` unusable-output branch); its billing asymmetry (request/token counters not bumped, USD spend still recorded) is in section 5's failure map; refusal copy is env-configured |
-| upstream outage (B7) and `ROUTING_CHAIN` (A7)                 | kept, but they are **operator scenes, not assessor clicks** — both need an env change + container restart (`OPENROUTER_BASE_URL` → dead port; `ROUTING_CHAIN` + `MOCK_FAILURE_MODE`)                                                                                                                                                        | listed in the runbook below; see the `ROUTING_CHAIN`/hung-backend traces already recorded in the decision log (section 4)                                                                                                  |
+| upstream outage (B7) and `ROUTING_CHAIN` (A7)                 | kept, but they are **operator scenes, not assessor clicks** — both need an env change + container restart (`OPENROUTER_BASE_URL` → dead port; `ROUTING_CHAIN` + `MOCK_FAILURE_MODE`)                                                                                                                                                        | listed in [`RUNBOOK.md`](RUNBOOK.md) (tier 2); see the `ROUTING_CHAIN`/hung-backend traces already recorded in the decision log (section 4)                                                                                                  |
 
 ### 8.3 Two tiers for running the set
 
@@ -426,146 +407,12 @@ assessor should look to check the claim.
 | **Code structure and exception handling** — invalid input, timeouts, bad model output | Adapters are the single provider seam (a swap is a new adapter, not a rewrite); policy stays in one readable rule file; invalid input is schema-rejected (`additionalProperties: false` → 400, and unknown `backendPin` → 400 with allowed ids); timeouts enforced at two layers (adapter abort + router per-chunk guard) after a real bug proved the adapter's alone wasn't enough; bad model output (empty/<15 chars) converts to a designed refusal rather than a served garbage answer; upstream failures walk the plan then 502 with the full plan | section 5, section 6; `routing/rules.ts` header, `backends/types.ts`, section 8.2 dropped-rows rationale     |
 | **Judgement** — what was built, what was skipped, and whether it was said so          | Every scope growth has a named decision (D11–D15), every cut is listed as _still cut_ (section 6), every known limitation is stated plainly (section 7), and the demo itself was narrowed explicitly with per-row reasons for what is not demoed (section 8.2) — including the two triggers that don't exist today (mid-stream fault, unusable output)                                                                                                                                                                                                  | sections 6–8; `docs/DECISIONS.md`; this report's section 3 iterated-with-measurement framing                 |
 
-## 10. Live demo runbook — payload + curl per chosen case
+## 10. How to verify it live
 
-Setup (Postman equivalent: import
-[`demo.postman_collection.json`](demo.postman_collection.json) and set the
-collection variables `baseUrl`, `apiKey` — the fixture key for the quota case
-is pre-filled). **Which key the assessor uses: log in to the console as
-`admin@demo.local` (password `mekari-demo-2026`, section 0), open
-`API Keys`, and copy `ops-key` — it stays revealable/copyable on the card.**
-That account's tenant has 500 req/day headroom for every tier-1 case, and the
-same login gives Observability to verify the trail afterwards. The only
-requests that use other keys are the quota cases, which have their own
-fixtures:
-
-```bash
-# 1) base + key — the admin@demo.local key copied from console → API Keys
-BASE=https://router.kreasiodigital.com          # or http://127.0.0.1:4000
-KEY=sk_…the ops-key copied from admin@demo.local's key card
-AUTH="Authorization: Bearer $KEY"
-CT="Content-Type: application/json"
-# fixtures for the quota case: STRESS crosses a 3 req/day limit over a few
-# calls; ZERO (quota-zero tenant, 0 req/day) denies on request #1 — see B4/B4b
-STRESS=sk_stress_key_0000000000000000
-ZERO=sk_zero_key_0000000000000000
-```
-
-Reading the responses: streaming routes answer with SSE — the first
-`event: meta` carries `backend`, `fallbackTriggered` and the full
-`routingPlan` (the pills an assessor needs); `event: final` carries metering
-and quota. Non-stream failures (401/400/429/502) come back as plain JSON.
-
-### 10.1 Tier 1 — assessor-replayable (Postman/curl only)
-
-```bash
-## A1 — chat, simple question → tier A
-curl -sN "$BASE/v1/chat" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"what is your refund window?"}'
-#   meta.routingPlan[0].reason  = "chat: simple question", backend openrouter-tier-a
-
-## A2 — chat, complex question → tier B
-curl -sN "$BASE/v1/chat" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"Explain why a gateway uses fallback, compare two failure modes, and list the detailed steps an operator follows when the policy also fails."}'
-#   reason "chat: complex question", backend openrouter-tier-b
-
-## A3 — assistant, strong retrieval + simple → tier A (conf ≈ 0.80)
-curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"how do I cancel my order?"}'
-#   meta.retrieval.confidence ≈ 0.80 (strong); plan [tierA, tierB]
-
-## A4 — assistant, weak band [0.48, 0.55) → tier B (conf ≈ 0.50)
-curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"can I sell items on the marketplace?"}'
-#   meta.retrieval.confidence ≈ 0.50 → reason "confidence 0.50 (weak), simple question" → tier B first
-
-## A5 — backendPin: pinned tier B first, tier A fallback behind it
-curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"how do I cancel my order?","backendPin":"openrouter-tier-b"}'
-#   plan[0].backendId = openrouter-tier-b, reason "pinned by request (eval A/B): …"
-
-## A6 — unknown backendPin → 400 (validated, never silently ignored)
-curl -s "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"how do I cancel my order?","backendPin":"ghost"}'
-#   {"error":{"code":"invalid_input","details":{"allowed":[…]}}}  — HTTP 400
-
-## B1 — policy refusal: conf < 0.48, no model call, cost 0
-curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"is the moon made of cheese?"}'
-#   meta: refusal true, backend "none"; final: refused true + reasoning;
-#   request slot consumed (bumpQuota(id, 0))
-
-## B2 — complex shape + low conf → refused before routing, tier B never reached
-curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"explain why dragons hoard gold, using multiple reasoning steps"}'
-#   ~4 hint words → complex shape; conf ≈ 0.17 (measured) < 0.48
-#   meta: refusal true, plan [{backendId:"none", action:"blocked_policy"}]
-
-## B4 — quota: the 3-requests/day fixture tenant; fire until the 429
-for i in 1 2 3 4 5; do
-  curl -s -o /dev/null -w "request $i → HTTP %{http_code}\n" \
-    "$BASE/v1/support-assistant" -X POST \
-    -H "Authorization: Bearer $STRESS" -H "$CT" \
-    -d '{"message":"how do I track my package?"}'
-done
-#   Use STRESS key for the demo sk_stress_key_0000000000000000
-#   the request that crosses the limit → 429 quota_exceeded with
-#   {limit, used, reset:"UTC midnight"}; counters are UTC-daily, so the exact
-#   step at which it lands depends on today's use of the fixture key — a fresh
-#   midnight gives exactly 3 × 200 then 429 on the 4th.
-
-## B4.1 — quota, instant variant: the quota-zero fixture denies on request #1
-curl -s "$BASE/v1/support-assistant" -X POST \
-  -H "Authorization: Bearer $ZERO" -H "$CT" -d '{"message":"hi"}'
-#   Use ZERO key for the demo sk_zero_key_0000000000000000
-#   HTTP 429 quota_exceeded on the very first call (used+1 > 0) — the same
-#   fail-closed behaviour B4 walks up to, with no sequence needed. Console
-#   demo: log in as zero@demo.local, connect the Playground with the ZERO
-#   key, send one message → quota_exceeded in the chat bubble and the X-ray.
-
-## B5 — auth fails closed: unknown key, and no header at all (same shape)
-curl -s "$BASE/v1/support-assistant" -X POST \
-  -H "Authorization: Bearer sk_not_a_real_key_at_all" -H "$CT" -d '{"message":"hi"}'
-#   HTTP 401 {"error":{"code":"unauthorized","message":"Unknown API key."}}
-curl -s "$BASE/v1/support-assistant" -X POST -H "$CT" -d '{"message":"hi"}'
-#   HTTP 401 — missing header, identical body shape
-
-## B6 — validation: >4000 chars, and an unknown field (schema is strict)
-curl -s "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d "{\"message\":\"$(printf 'x%.0s' $(seq 1 4001))\"}"
-#   HTTP 400 invalid_input (length violation)
-curl -s "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"hi","unexpectedField":true}'
-#   HTTP 400 invalid_input (additionalProperties: false)
-```
-
-Verify the trail afterwards: **Observability** (admin) or **Usage → routing
-decisions** shows each fired request as a decision row — the plan, actions and
-reasons must match what the response just streamed.
-
-### 10.2 Tier 2 — operator scenes (env change → restart → fire → revert)
-
-```bash
-## A7 & B3 — fallback: mock first, scripted stall → router timeout → tier A
-#   in docker-compose.yml environment add:
-#     ROUTING_CHAIN: "mock,openrouter-tier-a"
-#     MOCK_FAILURE_MODE: "hang"          # or "fail" for the hard-error variant
-docker compose up -d
-curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"how do I cancel my order?"}'
-#   meta.routingPlan = [mock failed "…timeout", openrouter-tier-a served],
-#   fallbackTriggered: true
-#   → then remove both lines and: docker compose up -d
-
-## B7 — upstream outage: both real tiers unreachable → 502, never a hang
-#   temporarily set: OPENROUTER_BASE_URL=http://127.0.0.1:9
-docker compose up -d
-curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"message":"how do I cancel my order?"}'
-#   502 {"error":{"code":"backend_unavailable",…,"details":{"plan":[both failed]}}}
-#   → revert the base URL and: docker compose up -d
-```
-
-The same requests also run from the console **Playground** for the visual
-rendering (meta → delta → final with the routing X-ray); this runbook's value
-is that the assessor can drive every tier-1 case without any console at all.
+Every case in section 8 — including the two not-demoed triggers of 8.2, whose
+boundaries are pinned in code and by the test suite — is executable without
+any console: [`RUNBOOK.md`](RUNBOOK.md) carries the whole runbook (setup +
+key fixtures, tier-1 assessor cases, tier-2 operator scenes), or import
+[`demo.postman_collection.json`](demo.postman_collection.json) and set
+`baseUrl` / `apiKey`. The console **Playground** renders the same requests
+visually (live X-ray: routing receipt, stream, metering).

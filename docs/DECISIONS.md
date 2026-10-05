@@ -40,6 +40,23 @@ through OpenRouter (`src/lib/ai.ts` in that repo). Three lessons transfer here:
    ladder is operationally cheap; the assessment replaces the human knob with
    automatic per-request rules.
 
+## Decision index
+
+D1–D10 were written before code; D11–D19 are the building addendum.
+
+| id  | decision                                                     | id  | decision                                                      |
+| --- | ------------------------------------------------------------ | --- | ------------------------------------------------------------- |
+| D1  | one system, not microservice sprawl                          | D11 | console accounts: admin _is_ a tenant; session cookie, no JWT |
+| D2  | Node.js + TypeScript; Fastify for the gateway                | D12 | one account, one named key; keys are irreplaceable            |
+| D3  | console: static React (Vite), gateway separate               | D13 | quota currency is USD                                         |
+| D4  | one adapter interface; OpenRouter provider; 3 backends       | D14 | activity feed + trace viewer (Langfuse-mini)                  |
+| D5  | per-request routing rules; every decision recorded           | D15 | chat sessions: grouping, never memory                         |
+| D6  | storage: SQLite via Drizzle ORM                              | D16 | UTC in storage and query; viewer's clock at render            |
+| D7  | retrieval: in-process lexical (MiniSearch), not embeddings   | D17 | p95 latency chart, target-line first                          |
+| D8  | eval: 30 held-out cases, exact-match intent, layered quality | D18 | streaming shape: TTFT measured, TPOT/tokens-per-s derived     |
+| D9  | deploy: self-hosted behind NGINX + Cloudflare                | D19 | TTFT is the default latency chart; round-trip stays a toggle  |
+| D10 | scope cuts declared up front (REPORT.md §6 carries them)     |     |                                                               |
+
 ---
 
 ## D1 — One system, not microservice sprawl
