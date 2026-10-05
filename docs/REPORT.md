@@ -104,8 +104,9 @@ Rules (first match wins; inputs are signals the request already produced) —
 2. **Tier A** for simple-shape questions with strong retrieval.
 3. **Tier B** for weak retrieval (ambiguity → worth stronger reasoning) or
    complex questions (long / multi-clause / comparison wording).
-4. **Fallback:** on upstream error or stall → next candidate. Fallback applies
-   until the first byte; after that a mid-stream fault is surfaced as an
+4. **Fallback:** on upstream error, stall, or a stream that ends with zero
+   content → next candidate. Fallback applies
+   until the first content delta; after that a mid-stream fault is surfaced as an
    explicit `error` event rather than re-routed, because re-routing
    mid-answer would splice or duplicate content.
 
@@ -195,7 +196,7 @@ client ──POST /v1/{chat|support-assistant}──►
   ② authenticate()      (401 unauthorized · 429 quota_exceeded · 503 quota_uncertain)
   ③ capability branch   chat: build messages · assistant: retrieval → confidence → refuse?
   ④ choosePrimary/primaryReason → plan = [primary, the other real tier]
-  ⑤ openWithFallback(plan) — walk candidates until first byte
+  ⑤ openWithFallback(plan) — walk candidates until the first content delta
   ⑥ SSE: meta → delta… → (error?) → final
   ⑦ settle-up: unusable-output guard → recordRequest (metering) → bumpQuota
 every path writes: routing_decisions row + requests row
@@ -234,16 +235,20 @@ puts a pinned adapter first (validated against the registry — unknown id →
 **400** with the allowed ids, never silently ignored); `ROUTING_CHAIN` env
 reorders the plan for demos. The mock is never picked by policy.
 
-**Stage 4 — dispatch (`routing/dispatch.ts`), walk the plan until first
-byte.** For each candidate: start the adapter's `stream()` generator and race
-the first chunk against the adapter timeout (A 8s, B 20s, mock 6s) via
+**Stage 4 — dispatch (`routing/dispatch.ts`), walk the plan until the first
+content delta.** For each candidate: start the adapter's `stream()` generator
+and race chunks against the adapter timeout (A 8s, B 20s, mock 6s) via
 `nextWithTimeout` — a _router-level_ guard on top of the adapter's own
 `AbortController`, after a probe proved a generator awaiting an internal
-`sleep` ignores aborts. First chunk → `served`
-(`fallbackTriggered` = any earlier step failed). Error/timeout/empty →
-`failed`/`abandoned`, the abandoned generator is finalized (fetch body freed),
+`sleep` ignores aborts. First delta → `served`
+(`fallbackTriggered` = any earlier step failed); a stream that **completes
+with zero deltas** is not a success — the step is marked `abandoned` and the
+next candidate serves, so a success-shaped empty stream can't burn the plan.
+Error/timeout →
+`failed`, the abandoned generator is finalized (fetch body freed),
 next candidate. Plan exhausted → **502 backend_unavailable** with the full
-plan in the body. The retry boundary is deliberately **first byte**: after
+plan in the body. The retry boundary is deliberately **first content
+delta**: after
 that, `guardedStream` keeps per-chunk racing (a backend going silent
 mid-answer becomes an explicit `error` SSE event, outcome `failed`) but is
 **never re-routed** — re-routing mid-answer would splice or duplicate
@@ -283,7 +288,7 @@ receipt". After the stream settles:
 | auth         | can't verify quota                       | 503 `quota_uncertain`                                                     | no — fail closed                   |
 | refusal gate | confidence < 0.48                        | served refusal, cost 0, outcome `refused`                                 | never (a decision, not an error)   |
 | validation   | unknown `backendPin`                     | 400 with the allowed ids                                                  | no                                 |
-| dispatch     | candidate errors / stalls / empty stream | next candidate `served`, `fallbackTriggered: true`                        | yes, until first byte              |
+| dispatch     | candidate errors / stalls / zero-delta completion | next candidate `served`, `fallbackTriggered: true`                  | yes, until first content delta     |
 | dispatch     | every candidate failed                   | 502 `backend_unavailable` + full plan                                     | no                                 |
 | streaming    | fault after first byte                   | explicit `error` SSE event, outcome `failed`                              | **never** — no mid-answer re-route |
 | output       | unusable model answer                    | converted to refusal; request/token quota not charged, USD spend recorded | caller retries                     |
@@ -389,7 +394,7 @@ in; the mock is never picked by policy (only via 5/7).
 | quota — tokens/day and USD budget axes                        | same `checkQuota` code path with the identical 429 shape (`quota.ts:66-77`); demoing one axis is the whole fail-closed story, and the spend axis moves ~1e-4 USD per request — nearly invisible in a live demo (`budgetUsdPerDay: 0.7`)                                                                                                     | eval + observability data carry the axes; `FLOW.md` documents the counters                                                                                                                                                 |
 | quota boundary semantics (#200 allowed, #201 denied)          | implicit in B4 — the check `used + 1 > limit` is quoted rather than staged as a separate scene                                                                                                                                                                                                                                              | `quota.ts` + the 429 body's own `limit`/`used` fields prove the semantics                                                                                                                                                  |
 | quota concurrency race (two requests passing check-then-bump) | non-deterministic — needs a parallel fire to demonstrate, and its absence/presence is not a graded behaviour; single-instance SQLite check-then-bump is not atomic and is listed as a known limitation instead                                                                                                                              | section 7 limitation + `lib/quota.ts`; the atomic-reserve fix is proposed, deferred                                                                                                                                        |
-| quota DB down → `503 quota_uncertain`                         | needs the in-process SQLite broken mid-run; there is no honest lever for it, and faking the DB failure would misrepresent more than it proves                                                                                                                                                                                               | branch is code-auditable (`lib/quota.ts:80-84`, `plugins/auth.ts`) and the fail-closed posture is shown by B4–B6 instead                                                                                                   |
+| quota DB down → `503 quota_uncertain`                         | needs the in-process SQLite broken mid-run; there is no honest lever for it, and faking the DB failure would misrepresent more than it proves                                                                                                                                                                                               | branch is code-auditable (`lib/quota.ts:80-88`, `plugins/auth.ts`) and pinned by the test suite (`lib/quota.test.ts`) and the fail-closed posture is shown by B4–B6 instead                                                                                                   |
 | missing Authorization header (401)                            | not dropped on merit — omitted as redundant with the unknown-key curl (B5); same fail-closed auth, same `{error:{code,message}}` shape                                                                                                                                                                                                      | the unknown-key case B5 demonstrates the identical shape; it is the trivially cheap extra curl if wanted                                                                                                                   |
 | complexity boundary, 240 vs 241 chars                         | the boundary IS the rule shown by A1 vs A2 — a third request one character longer adds a scene without adding a failure shape; substring/case semantics cited from code (`rules.ts` `questionComplexity`)                                                                                                                                   | A1/A2 pair; boundary constants quoted                                                                                                                                                                                      |
 | mid-stream fault (error after first byte)                     | no on-demand trigger exists: the mock can only fail _before_ first byte, and real provider faults aren't scriptable to a scene; would need a mock `midstream` mode (env-only today) — rejected to keep the demo zero-new-code                                                                                                               | the boundary is documented and code-pinned (`routing/dispatch.ts` `guardedStream` — error event, never re-routing/splice) and the SSE shapes are in `FLOW.md`                                                              |
@@ -415,7 +420,7 @@ assessor should look to check the claim.
 
 | criterion                                                                             | how this system satisfies it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | evidence                                                                                                     |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Correctness of the request path** — auth, quota, streaming, failure behaviour       | Bearer auth is a SHA-256 lookup with one key = one tenant, no key = 401; quota is fail-closed **twice** (over limit → 429, check itself failing → 503 `quota_uncertain` rather than serving blind); streaming everywhere (SSE) with fallback bounded by first byte; every failure path returns a machine-readable `{error:{code,message,details}}` with the right status — and no path hangs (per-chunk router timeout)                                                                                                                                 | section 8.1 tables A/B; `plugins/auth.ts`, `lib/quota.ts`, `routing/dispatch.ts`, `lib/errors.ts`; section 5 |
+| **Correctness of the request path** — auth, quota, streaming, failure behaviour       | Bearer auth is a SHA-256 lookup with one key = one tenant, no key = 401; quota is fail-closed **twice** (over limit → 429, check itself failing → 503 `quota_uncertain` rather than serving blind); streaming everywhere (SSE) with fallback bounded by first byte; every failure path returns a machine-readable `{error:{code,message,details}}` with the right status — and no path hangs (per-chunk router timeout)                                                                                                                                 | section 8.1 tables A/B; `plugins/auth.ts`, `lib/quota.ts`, `routing/dispatch.ts`, `lib/errors.ts`; section 5; the failure-path test suite — 16 tests via `npm run test --workspace gateway` — pins the fail-closed 503, the 429 shapes and the full fallback contract |
 | **Routing and fallback** — reasoned rather than arbitrary, observable                 | Three cheap signals (complexity shape, retrieval confidence, capability), first-match-wins, each input a measured trade-off: tier B costs 11.6× tier A for +0.73 groundedness (section 4), retrieval separates on/off-KB classes (section 3); weak-retrieval band, refusal floor, and the two debug overrides (`backendPin`, `ROUTING_CHAIN`) are scoped and stated. Observable: every decision row is persisted and rendered — plan, action, reason per candidate                                                                                      | section 2, section 4; `docs/RULES.md`; `routing_decisions` table + console decision log                      |
 | **Measurement** — tokens, latency, cost recorded accurately; quality with numbers     | One metering row per turn: prompt/completion tokens (provider-reported when OpenRouter supplies usage, estimate fallback, `costSource` distinguishes), e2e latency _and_ TTFT, USD cost — the same currency the quota enforces; quality measured, not asserted: 87% intent accuracy, LLM-judge groundedness 3.37 (A) vs 4.10 (B), latency p95, cost per 30 cases                                                                                                                                                                                        | section 4 table; `lib/metering.ts`; `docs/EVALUATION.md`                                                     |
 | **Code structure and exception handling** — invalid input, timeouts, bad model output | Adapters are the single provider seam (a swap is a new adapter, not a rewrite); policy stays in one readable rule file; invalid input is schema-rejected (`additionalProperties: false` → 400, and unknown `backendPin` → 400 with allowed ids); timeouts enforced at two layers (adapter abort + router per-chunk guard) after a real bug proved the adapter's alone wasn't enough; bad model output (empty/<15 chars) converts to a designed refusal rather than a served garbage answer; upstream failures walk the plan then 502 with the full plan | section 5, section 6; `routing/rules.ts` header, `backends/types.ts`, section 8.2 dropped-rows rationale     |
@@ -472,7 +477,7 @@ curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
 ## A4 — assistant, weak band [0.48, 0.55) → tier B (conf ≈ 0.50)
 curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
   -d '{"message":"can I sell items on the marketplace?"}'
-#   meta.retrieval.confidence ≈ 0.50; reason "…, weak); tier B first
+#   meta.retrieval.confidence ≈ 0.50 → reason "confidence 0.50 (weak), simple question" → tier B first
 
 ## A5 — backendPin: pinned tier B first, tier A fallback behind it
 curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
