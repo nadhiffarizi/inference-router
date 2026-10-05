@@ -187,7 +187,7 @@
                 "support-assistant"
               ]
             },
-            "description": "≈6s scripted stall, then mock → failed (\"stalled 6000ms … router timeout\"), openrouter-tier-a → served, fallbackTriggered: true. The deployed box runs MOCK_FAILURE_MODE=hang permanently (policy routing never picks the mock). Console twin: Playground → \"fault: on\" → send."
+            "description": "≈6s scripted stall, then mock → failed (\"stalled 6000ms … router timeout\"), openrouter-tier-a → served, fallbackTriggered: true. The deployed box runs MOCK_FAILURE_MODE=hang permanently (policy routing never picks the mock). Console twin: Playground → \"fault: fallback\" → send."
           }
         }
       ]
