@@ -20,7 +20,7 @@ set is obvious at a glance):
 |---|---|---|
 | [`DECISIONS.md`](DECISIONS.md) | the decision log, written **before** any code — every defended choice (D1–D19) with its reason and what was rejected | section 0 intro, section 6 (D11–D15 growth/cut), section 9 judgement row, section 7 |
 | [`RULES.md`](RULES.md) | routing rationale: every rule, threshold and override, mirroring `routing/rules.ts` | section 2 (rules + trade-offs), section 8.1 (case table), section 9 evidence |
-| [`FLOW.md`](FLOW.md) | one request walked end to end — entry gates, capability branch, routing, fallback, SSE event shapes — with clickable code references | section 1 (what was built), section 4 (measured behaviour), section 5 (failure shapes), section 8.2, section 9 correctness row |
+| [`FLOW.md`](FLOW.md) | one request walked end to end — entry gates, capability branch, routing, fallback, SSE event shapes — with clickable code references | section 5 (the condensed walk lives in the report; the doc has the full line-referenced version), section 4 (measured behaviour), section 8.2, section 9 correctness row |
 
 Decision index — every `D<n>` cited in this report resolves to one of these
 entries in [`DECISIONS.md`](DECISIONS.md) (D1–D10 wrote before code; D11–D19
@@ -48,6 +48,7 @@ Where the report's required content lives:
 | retrieval choices | section 3 (lexical by design, floor calibrated from probe data), decision D7 |
 | how it was evaluated | section 4 (30 held-out cases through the real request path, LLM-judged), per-case detail in [`EVALUATION.md`](EVALUATION.md) |
 | trade-offs accepted | section 4 (the 11.6×-cost read line), section 6 (cut vs deliberately grown), section 7 (limitations, said plainly), section 8.2 (what the demo set drops and why) |
+| the request path (which functions run, in which order) | section 5 (stage-by-stage walkthrough + the complete failure map), expanded with code references in [`FLOW.md`](FLOW.md) |
 | how to verify it live | section 10 (payload-level runbook, every tier-1 case fired live) |
 
 ## 1. What was built
@@ -183,16 +184,112 @@ Measured routing behaviour (also shown live in the decision log):
   `sleep` ignores the fetch `AbortController`)
 - quota exhausted → `429` with limits/remaining/reset in the body
 
-## 5. Exceptions and failure handling
+## 5. The request path — the functions the gateway calls, and how each failure is handled
 
-- All errors are machine-readable: `{error: {code, message, details}}` with
-  correct status (401/400/403/409/429/503/502/500). Quota checks that *cannot
-  verify* (DB down) deny rather than assume — failing closed twice over.
-- Metering never blocks the request path; failed metering is logged loudly
-  instead of crashing a served request.
-- Session/tenancy violations are server-enforced (`403`), not hidden in UI.
-- The judge in eval degrades honestly: without a key it prints its absence
-  rather than fabricating numbers.
+The condensed walkthrough; [`FLOW.md`](FLOW.md) carries the same walk with
+every line reference expanded.
+
+```
+client ──POST /v1/{chat|support-assistant}──►
+  ① schema validation   (400 invalid_input)
+  ② authenticate()      (401 unauthorized · 429 quota_exceeded · 503 quota_uncertain)
+  ③ capability branch   chat: build messages · assistant: retrieval → confidence → refuse?
+  ④ choosePrimary/primaryReason → plan = [primary, the other real tier]
+  ⑤ openWithFallback(plan) — walk candidates until first byte
+  ⑥ SSE: meta → delta… → (error?) → final
+  ⑦ settle-up: unusable-output guard → recordRequest (metering) → bumpQuota
+every path writes: routing_decisions row + requests row
+```
+
+**Stage 1 — entry gates, all before any model.** Fastify's declared JSON
+schema (`routes/chat.ts`, `routes/assistant.ts`) rejects a bad body before
+any handler runs → **400 invalid_input** with per-violation details
+(`additionalProperties: false`, >4000 chars). Then the `authenticate` hook
+(`plugins/auth.ts`) does identity + tenancy + quota in one place: `Bearer` →
+`sha256` lookup (`api_keys`, plaintext only stored hashed) → **401** on no
+match; one key = one tenant. `checkQuota` (`lib/quota.ts`) enforces three
+counters on a fixed UTC-day window — requests, tokens, USD spend (spend is
+summed from the `requests` metering rows: one source of truth for cost). The
+fail-closed subtlety: `checkQuota` **throws** when the DB is unreadable, and
+the auth layer surfaces that as **503 quota_uncertain** — a gateway that
+cannot *verify* quota must not serve blind. Both endpoints inherit this gate
+because it is a pre-handler hook.
+
+**Stage 2 — the capability branch, the only place the endpoints differ.**
+`/v1/chat` builds `[system prompt, user message]`. `/v1/support-assistant`
+runs retrieval first (`rag/kb.ts`): MiniSearch lexical top-k, an asymptotic
+squash of the best hit's score, blended with intent concentration — two
+numbers, `confidence` and `detectIntent`, exist before any model is chosen.
+Then the refuse gate: `confidence < 0.48` (`config.assistant`) → **no model
+is called**; the gateway streams the refusal like a served turn
+(`backend: "none"`, `blocked_policy` decision row, `bumpQuota(tenant, 0)` —
+a request slot consumed, zero tokens).
+
+**Stage 3 — route plan (`routing/rules.ts`), first match wins.**
+`choosePrimary`/`primaryReason` evaluate cheap local signals — weak-retrieval
+band `[0.48, 0.55)` → tier B; complexity (length, ≥2 hint words, multiple `?`)
+→ tier B; else tier A. The plan is always `[primary, the other real tier]` —
+cross-tier fallback is baked into every request. Overrides: `backendPin`
+puts a pinned adapter first (validated against the registry — unknown id →
+**400** with the allowed ids, never silently ignored); `ROUTING_CHAIN` env
+reorders the plan for demos. The mock is never picked by policy.
+
+**Stage 4 — dispatch (`routing/dispatch.ts`), walk the plan until first
+byte.** For each candidate: start the adapter's `stream()` generator and race
+the first chunk against the adapter timeout (A 8s, B 20s, mock 6s) via
+`nextWithTimeout` — a *router-level* guard on top of the adapter's own
+`AbortController`, after a probe proved a generator awaiting an internal
+`sleep` ignores aborts. First chunk → `served`
+(`fallbackTriggered` = any earlier step failed). Error/timeout/empty →
+`failed`/`abandoned`, the abandoned generator is finalized (fetch body freed),
+next candidate. Plan exhausted → **502 backend_unavailable** with the full
+plan in the body. The retry boundary is deliberately **first byte**: after
+that, `guardedStream` keeps per-chunk racing (a backend going silent
+mid-answer becomes an explicit `error` SSE event, outcome `failed`) but is
+**never re-routed** — re-routing mid-answer would splice or duplicate
+content: correct-looking and wrong is worse than visibly broken.
+
+**Stage 5 — stream out (`lib/sse.ts`), then settle up.** The client sees
+`event: meta` *before any delta* (requestId, backend, full routingPlan —
+which is why the Playground renders "tier A, fallback fired" live), then
+`delta…`, then `final` with metering (`model, tokens, latencyMs, ttftMs,
+estimatedCostUsd, costSource — provider-reported when OpenRouter supplies
+usage, ~4-chars/token estimate otherwise`). After the stream settles:
+
+1. Unusable-output guard: an answer under 15 chars becomes `refused: true` —
+   a degraded backend can't eat the tenant's request allowance, but its
+   tokens and cost stay on the `requests` row (the call happened), and the
+   USD budget reads those rows.
+2. `recordRequest` meters one row per turn (tokens, latency, TTFT, cost,
+   outcome `ok|refused|failed`, full trace for replay). Metering never blocks
+   the hot path; a failed metering is logged loudly, never fatal.
+3. `bumpQuota(tenant, tokens)` after the fact.
+4. `routing_decisions` row per plan step (`served`/`failed`/`abandoned`/
+   `blocked_policy`) — the decision log the console renders.
+
+**The failure map** (every failure, which status, retried or not):
+
+| stage | failure | status / behaviour | retried? |
+|---|---|---|---|
+| schema | bad body | 400 `invalid_input` | no |
+| auth | missing/unknown key | 401 | no |
+| auth | over quota | 429 + `limits`/`used`/`reset` | no |
+| auth | can't verify quota | 503 `quota_uncertain` | no — fail closed |
+| refusal gate | confidence < 0.48 | served refusal, cost 0, outcome `refused` | never (a decision, not an error) |
+| validation | unknown `backendPin` | 400 with the allowed ids | no |
+| dispatch | candidate errors / stalls / empty stream | next candidate `served`, `fallbackTriggered: true` | yes, until first byte |
+| dispatch | every candidate failed | 502 `backend_unavailable` + full plan | no |
+| streaming | fault after first byte | explicit `error` SSE event, outcome `failed` | **never** — no mid-answer re-route |
+| output | unusable model answer | converted to refusal; request/token quota not charged, USD spend recorded | caller retries |
+
+All failures share one body shape: `{error: {code, message, details}}` with
+the correct status; nothing hangs (per-chunk timeout), nothing reports
+success for a broken answer. Console-side violations (role/tenancy) are
+server-enforced `403`, not hidden in the UI; the eval judge degrades honestly
+(absent key printed, not fabricated numbers).
+
+Design idea that ties the path together: **everything before the model is
+cheap and enforced; everything after first byte is honest and billed.**
 
 ## 6. Scope: what was cut, and what deliberately grew
 
