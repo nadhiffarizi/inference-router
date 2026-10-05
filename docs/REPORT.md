@@ -386,9 +386,8 @@ in; the mock is never picked by policy (only via 5/7).
 
 | tier                | who                                                                                                                                         | how                                                                                                                             |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 1 — assessor-driven | the key from `admin@demo.local` (console → API Keys; it stays revealable/copyable there) plus the two quota fixture keys, Postman/curl only | all of A **including A7/B3 fallback now** (pin the mock), plus B1, B2, B4, B5, B6: payloads are fixed, responses are the evidence, Observability replays each decision |
-| 2 — operator scenes | the deployer, env → `docker compose up -d` → fire → revert                                                                                  | B7 (dead base URL), the `ROUTING_CHAIN` chain-order variant of the fallback scene                                               |
-| 1.5 — fallback fired, no console | the A7/B3 scene above: `backendPin:"mock"` (playground: "fault: on") runs against the deployed box as-is — B3 is a tier-1 case on the live deployment |
+| 1 — assessor-driven | the key from `admin@demo.local` (console → API Keys; it stays revealable/copyable there) plus the two quota fixture keys, Postman/curl only | all of A **including A7/B3 fallback** (`backendPin:"mock"` — the deployed box runs the mock in hang mode permanently; console twin: the playground's "fault: on" toggle), plus B1, B2, B4, B4.1, B5, B6: payloads are fixed, responses are the evidence, Observability replays each decision |
+| 2 — operator scenes | the deployer, env → `docker compose up -d` → fire → revert                                                                                  | B7 (dead base URL), the `ROUTING_CHAIN` chain-order variant of the fallback scene (costs every request a stall — revert after) |
 
 Tier 2 exists for the recorded walkthrough where cuts can hide the restart;
 tier 1 is what an assessor runs independently. The full case coverage lives
