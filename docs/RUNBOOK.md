@@ -123,10 +123,10 @@ skipped]` and `fallbackTriggered: true`. The `final` metering's `ttftMs`
 honestly includes the whole stall (~7s) — that's the caller-perceived story.
 
 **Console twin (the video-friendly one):** Playground → assistant mode →
-flip the **`fault: on`** toggle next to the capability picker → send → the
-X-ray shows the chain live: mock failing, tier A serving, the fallback badge
-firing — then click the bubble to open the trace and read the same plan from
-the decision row.
+flip the **`fault: fallback`** toggle next to the capability picker → send →
+the X-ray shows the chain live: mock failing, tier A serving, the fallback
+badge firing — then click the bubble to open the trace and read the same plan
+from the decision row.
 
 Env-level variant (operator only, §8.1 row 7): `ROUTING_CHAIN:
 "mock,openrouter-tier-a"` in docker-compose → `docker compose up -d` makes
@@ -229,8 +229,8 @@ Expect (both routes): ≈6s scripted stall, then a streamed
 backend served the request: …", "details":{"plan":[{"backendId":"mock",
 "action":"failed", …}]}}}` — no `meta` (nothing was served), then
 `stream_end`. `pinStrict` without `backendPin` → 400. Console twin:
-Playground toggle cycles `fault: off → on → strict`; "strict" runs this
-exact scene in either capability.
+Playground toggle cycles `fault: off → fallback → outage`; "outage" runs
+this exact scene in either capability.
 
 **Env-level variant (operator):** both *real* tiers dead at once:
 

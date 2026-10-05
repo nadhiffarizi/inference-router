@@ -456,12 +456,12 @@ function SessionChat({
             className="h-7 rounded-full px-2.5 text-xs"
             onClick={() => setDemoMode((v) => (v === "off" ? "on" : v === "on" ? "strict" : "off"))}
             title={{
-              off: "demo fault off — cycle: pinned mock (timeout → fallback), then strict pin (exhausts → backend_unavailable)",
-              on: "demo fault ON — the failing mock is pinned first, real tiers behind: router timeout → fallback fires. Click again for strict.",
-              strict: "demo fault STRICT — ONLY the pinned mock is in the plan: its failure exhausts into backend_unavailable. Click to reset.",
+              off: "demo fault off — cycle: fallback scene (pinned mock stalls, tier rescues), then outage scene (mock-only pin, chain exhausts)",
+              on: "fault: fallback — the mock is pinned first, real tiers behind it: router timeout → tier A rescues. Click again for the outage scene.",
+              strict: "fault: outage — ONLY the mock is in the plan (pinStrict): its failure exhausts into backend_unavailable, no answer. Click to reset.",
             }[demoMode]}
           >
-            <CircleSlash className="size-3" /> {demoMode === "off" ? "fault: off" : `fault: ${demoMode}`}
+            <CircleSlash className="size-3" /> {demoMode === "off" ? "fault: off" : demoMode === "on" ? "fault: fallback" : "fault: outage"}
           </Button>
         </div>
         <div className="flex items-center gap-1">
