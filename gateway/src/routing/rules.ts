@@ -30,6 +30,14 @@ export type RouteContext = {
    * tier without redeploying two configs.
    */
   pinBackendId?: string;
+  /**
+   * With `pinStrict`, the plan contains ONLY the pinned backend: if it fails,
+   * the chain exhausts into `backend_unavailable` instead of quietly serving
+   * with another model. A real caller semantic ("fail rather than degrade")
+   * — and the on-demand trigger for the exhaustion path that the env-level
+   * outage scene (dead base URL) exercises.
+   */
+  pinStrict?: boolean;
 };
 
 export type Candidate = {
@@ -75,6 +83,10 @@ export function primaryReason(ctx: RouteContext): string {
 export function buildRoutePlan(ctx: RouteContext, byId: Map<string, ModelAdapter>): Candidate[] {
   if (ctx.pinBackendId && byId.has(ctx.pinBackendId)) {
     const pin = byId.get(ctx.pinBackendId)!;
+    // strict pin: no fallback behind it — exhaustion is the honest outcome
+    if (ctx.pinStrict) {
+      return [{ adapter: pin, reason: `pinned by request, strict (no fallback): ${primaryReason(ctx)}` }];
+    }
     const pinned = [{ adapter: pin, reason: `pinned by request (eval A/B): ${primaryReason(ctx)}` }];
     return pinned.concat(
       buildRoutePlan({ ...ctx, pinBackendId: undefined }, byId).filter((c) => c.adapter.meta.id !== ctx.pinBackendId),

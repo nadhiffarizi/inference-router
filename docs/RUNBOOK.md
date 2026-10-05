@@ -212,16 +212,35 @@ per-field `violations`, and an unknown-field violation
 off — pinned by the HTTP-level test in
 `gateway/src/routes/http-validation.test.ts`).
 
-### B7 — upstream outage: both real tiers unreachable → 502, never a hang
+### B7 — upstream outage: every candidate dead → backend_unavailable, never a hang
 
-Operator scene (needs an env change + restart):
+**On demand (tier 1) — `pinStrict`:** the strict pin keeps ONLY the pinned
+backend in the plan, so its failure exhausts the chain on the spot — the same
+exhaustion path an env-level outage walks, no env change needed:
+
+```bash
+curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"how do I cancel my order?","backendPin":"mock","pinStrict":true}'
+curl -sN "$BASE/v1/chat" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"message":"how do I cancel my order?","backendPin":"mock","pinStrict":true}'
+```
+Expect (both routes): ≈6s scripted stall, then a streamed
+`event: error` with `{"error":{"code":"backend_unavailable", "message":"no
+backend served the request: …", "details":{"plan":[{"backendId":"mock",
+"action":"failed", …}]}}}` — no `meta` (nothing was served), then
+`stream_end`. `pinStrict` without `backendPin` → 400. Console twin:
+Playground toggle cycles `fault: off → on → strict`; "strict" runs this
+exact scene in either capability.
+
+**Env-level variant (operator):** both *real* tiers dead at once:
 
 ```bash
 # temporarily set: OPENROUTER_BASE_URL=http://127.0.0.1:9
 docker compose up -d
 curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
   -d '{"message":"how do I cancel my order?"}'
-#   HTTP 200 + SSE error event … or the plain 502 shape:
+#   every candidate tried and failed (a `failed` step each, with its real
+#   error), then: HTTP 200 + SSE error event … or the plain 502 shape:
 #   {"error":{"code":"backend_unavailable",…,"details":{"plan":[both failed]}}}
 #   → revert the base URL and: docker compose up -d
 ```

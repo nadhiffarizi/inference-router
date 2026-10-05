@@ -27,6 +27,9 @@ const BodySchema = {
   properties: {
     message: { type: "string", minLength: 1, maxLength: 4000 },
     backendPin: { type: "string" },
+    /** With pinStrict the plan is ONLY the pinned backend — failure exhausts
+        into backend_unavailable (fail rather than degrade). Requires pin. */
+    pinStrict: { type: "boolean" },
     /** Caller-declared session grouping (their ticket/chat id) — optional. */
     sessionId: { type: "string", maxLength: 100 },
   },
@@ -34,7 +37,7 @@ const BodySchema = {
 } as const;
 
 export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, ModelAdapter>): void {
-  app.post<{ Body: { message: string; backendPin?: string; sessionId?: string } }>(
+  app.post<{ Body: { message: string; backendPin?: string; pinStrict?: boolean; sessionId?: string } }>(
     "/v1/support-assistant",
     { schema: { body: BodySchema }, onRequest: authenticate },
     async (req, reply) => {
@@ -115,11 +118,15 @@ export function registerAssistantRoute(app: FastifyInstance, byId: Map<string, M
       if (req.body.backendPin && !byId.has(req.body.backendPin)) {
         throw errors.invalidInput(`unknown backendPin "${req.body.backendPin}"`, { allowed: [...byId.keys()] });
       }
+      if (req.body.pinStrict && !req.body.backendPin) {
+        throw errors.invalidInput("pinStrict requires backendPin — there is nothing to pin");
+      }
       const routeCtx: RouteContext = {
         capability: "support-assistant",
         question: req.body.message,
         retrievalConfidence: confidence,
         pinBackendId: req.body.backendPin,
+        pinStrict: req.body.pinStrict,
       };
       const plan = buildRoutePlan(routeCtx, byId);
 

@@ -144,6 +144,40 @@ test("chat: unknown backendPin → 400 with allowed ids (same contract as the as
   assert.deepEqual(body.error.details?.allowed, ["openrouter-tier-a", "openrouter-tier-b", "mock"]);
 });
 
+test("pinStrict without pin → 400 (a strict pin needs something to pin)", async () => {
+  // chat route: the assistant's refusal gate would otherwise answer first
+  // (empty KB refuses everything) — pin validation is downstream of it there
+  const res = await app.inject({
+    method: "POST", url: "/v1/chat", headers: AUTH,
+    payload: { message: "hi", pinStrict: true },
+  });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.json<{ error: { message: string } }>().error.message, /pinStrict requires backendPin/);
+});
+
+test("fail-rather-than-degrade: strict pin of a dead backend exhausts → SSE error backend_unavailable with the plan", async () => {
+  const res = await app.inject({
+    method: "POST", url: "/v1/chat", headers: AUTH,
+    payload: { message: "how do I cancel my order?", sessionId: "strict-pin-1", backendPin: "mock", pinStrict: true },
+  });
+  assert.equal(res.statusCode, 200); // SSE stream: the failure is an event, not the status
+  assert.match(res.body, /event: error/);
+  const errLine = res.body.split("\n")
+    .reduce<string | undefined>((acc, l, i, a) => (!acc && a[i - 1] === "event: error" ? l : acc), undefined);
+  const err = JSON.parse(errLine!.replace(/^data:\s*/, ""));
+  assert.equal(err.error.code, "backend_unavailable");
+  assert.ok(err.error.details?.plan, "the full plan must ride with the failure");
+  assert.equal(err.error.details.plan[0].action, "failed");
+  // no meta event — nothing was served, and exhaustion happened pre-meta
+  assert.ok(!res.body.includes("event: meta"));
+  // metered as failed, and the decision trail persisted the exhausted chain
+  const { requests, routingDecisions } = await import("../db/schema.js");
+  const rows = db.select().from(requests).where(eq(requests.tenantId, tenantId)).all();
+  assert.ok(rows.some((r) => r.outcome === "failed"));
+  const dec = db.select().from(routingDecisions).where(eq(routingDecisions.tenantId, tenantId)).all();
+  assert.ok(dec.some((d) => d.fallbackTriggered === false && d.planJson.includes('"failed"')));
+});
+
 test("valid request through the whole path: refusal stream, SSE events, metering row written", async () => {
   // empty KB → confidence 0 → refusal gate before routing; no adapter is in
   // the registry, so this still exercises schema → auth → retrieve → refuse → meter
@@ -158,11 +192,15 @@ test("valid request through the whole path: refusal stream, SSE events, metering
   assert.equal(meta.routingPlan[0].action, "blocked_policy");
   const final = JSON.parse(eventPayload(res.body, "final")!);
   assert.equal(final.refused, true);
-  // metering: the refusal-turn row exists, zero tokens, decision row persisted
-  const row = db.select().from(requests).where(eq(requests.tenantId, tenantId)).all()[0];
-  assert.equal(row?.outcome, "refused");
-  assert.equal(row?.completionTokens, 0);
-  const dec = db.select().from(routingDecisions).where(eq(routingDecisions.tenantId, tenantId)).all()[0];
-  assert.ok(!dec?.fallbackTriggered); // boolean false (drizzle maps the 0/1 column)
-  assert.ok(dec?.planJson.includes('"blocked_policy"'));
+  // metering: a refusal-turn row exists (zero tokens), persisted with its
+  // decision row — earlier tests in this file already wrote failed rows, so
+  // match on kind, not positional order
+  const rows = db.select().from(requests).where(eq(requests.tenantId, tenantId)).all();
+  const refusedRow = rows.find((r) => r.outcome === "refused");
+  assert.ok(refusedRow, "expected a refused metering row");
+  assert.equal(refusedRow.completionTokens, 0);
+  const dec = db.select().from(routingDecisions).where(eq(routingDecisions.tenantId, tenantId)).all();
+  const refusalDec = dec.find((d) => d.planJson.includes('"blocked_policy"'));
+  assert.ok(refusalDec);
+  assert.ok(!refusalDec.fallbackTriggered); // boolean false (drizzle maps the 0/1 column)
 });

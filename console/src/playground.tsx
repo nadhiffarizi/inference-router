@@ -210,11 +210,13 @@ function SessionChat({
       the only place the text lives. */
   const [sentInput, setSentInput] = useState("");
   const [busy, setBusy] = useState(false);
-  /** Demo lever: pin the scripted mock first (mock runs in hang mode) so the
-      router timeout → fallback fires on demand, in the UI, with zero env
-      changes or restarts. Works in both capabilities — /v1/chat accepts the
-      same validated backendPin as the assistant route. */
-  const [demoFault, setDemoFault] = useState(false);
+  /** Demo levers, one cycling control: "on" pins the scripted mock first
+      (hang mode) so the router timeout → tier fallback fires; "strict" pins
+      ONLY the mock (pinStrict) so the failure exhausts the chain into
+      backend_unavailable — fail rather than degrade. Both work on either
+      capability; /v1/chat accepts the same validated pin fields as the
+      assistant route. */
+  const [demoMode, setDemoMode] = useState<"off" | "on" | "strict">("off");
   const abortRef = useRef<AbortController | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   /** Latest requested session for loadTurns — stales out slow list/timeline responses. */
@@ -301,7 +303,8 @@ function SessionChat({
         capability === "chat" ? "/v1/chat" : "/v1/support-assistant",
         { message: input, sessionId: activeExt,
           ...(capability === "chat" ? { maxTokens: 500 } : {}),
-          ...(demoFault ? { backendPin: "mock" } : {}) },
+          ...(demoMode !== "off" ? { backendPin: "mock" } : {}),
+          ...(demoMode === "strict" ? { pinStrict: true } : {}) },
         apiKey,
         {
           onMeta: setMeta,
@@ -449,14 +452,16 @@ function SessionChat({
           </Button>
           <Button
             type="button" size="sm"
-            variant={demoFault ? "destructive" : "ghost"}
+            variant={demoMode === "off" ? "ghost" : "destructive"}
             className="h-7 rounded-full px-2.5 text-xs"
-            onClick={() => setDemoFault((v) => !v)}
-            title={demoFault
-              ? "demo fault ON — the failing mock is pinned first: router timeout → fallback fires"
-              : "demo fault off — pin the failing mock first to watch timeout → fallback fire"}
+            onClick={() => setDemoMode((v) => (v === "off" ? "on" : v === "on" ? "strict" : "off"))}
+            title={{
+              off: "demo fault off — cycle: pinned mock (timeout → fallback), then strict pin (exhausts → backend_unavailable)",
+              on: "demo fault ON — the failing mock is pinned first, real tiers behind: router timeout → fallback fires. Click again for strict.",
+              strict: "demo fault STRICT — ONLY the pinned mock is in the plan: its failure exhausts into backend_unavailable. Click to reset.",
+            }[demoMode]}
           >
-            <CircleSlash className="size-3" /> {demoFault ? "fault: on" : "fault: off"}
+            <CircleSlash className="size-3" /> {demoMode === "off" ? "fault: off" : `fault: ${demoMode}`}
           </Button>
         </div>
         <div className="flex items-center gap-1">

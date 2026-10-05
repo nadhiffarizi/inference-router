@@ -24,6 +24,9 @@ const BodySchema = {
         route: force this backend first in the plan (e.g. "mock" to watch the
         router timeout → fallback fire). */
     backendPin: { type: "string" },
+    /** With pinStrict the plan is ONLY the pinned backend — failure exhausts
+        into backend_unavailable (fail rather than degrade). Requires pin. */
+    pinStrict: { type: "boolean" },
   },
   additionalProperties: false,
 } as const;
@@ -40,7 +43,7 @@ export function registerChatRoute(
   systemPrompt: string,
 ): void {
   app.post<{
-    Body: { message: string; maxTokens?: number; sessionId?: string; backendPin?: string };
+    Body: { message: string; maxTokens?: number; sessionId?: string; backendPin?: string; pinStrict?: boolean };
   }>(
     "/v1/chat",
     {
@@ -59,10 +62,14 @@ export function registerChatRoute(
       if (req.body.backendPin && !byId.has(req.body.backendPin)) {
         throw errors.invalidInput(`unknown backendPin "${req.body.backendPin}"`, { allowed: [...byId.keys()] });
       }
+      if (req.body.pinStrict && !req.body.backendPin) {
+        throw errors.invalidInput("pinStrict requires backendPin — there is nothing to pin");
+      }
       const routeCtx: RouteContext = {
         capability: "chat",
         question: req.body.message,
         pinBackendId: req.body.backendPin,
+        pinStrict: req.body.pinStrict,
       };
       const plan = buildRoutePlan(routeCtx, byId);
 
