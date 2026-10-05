@@ -209,6 +209,64 @@ event: final  → metering {model, tokens, latencyMs, ttftMs, estimatedCostUsd, 
 `meta` arrives *before any delta*, which is why the playground can render "this
 will be served by tier A, fallback fired" live without waiting for the answer.
 
+### The `meta` event — the routing receipt
+
+`meta` is the first event of the stream: everything the gateway decided about
+the request *before the model emitted a token*. It exists so a client can
+render routing live instead of discovering the plan after the answer ends.
+
+| event | arrives | carries |
+|---|---|---|
+| `meta` | first, **before any text** | which backend won, the routing plan, fallback info |
+| `delta` | repeated | the answer text, chunk by chunk |
+| `error` | only on a fault | structured `{code, message, details}` |
+| `final` | last | metering: tokens, latency, TTFT, cost, quota remaining |
+
+Payload (chat — `routes/chat.ts:82-88`):
+
+```json
+{
+  "requestId": "3ba4c281-…",
+  "backend": { "id": "openrouter-tier-b", "label": "Tier B · capable",
+               "model": "anthropic/claude-haiku-4.5" },
+  "fallbackTriggered": false,
+  "routingPlan": [
+    { "backendId": "openrouter-tier-a", "action": "failed",
+      "reason": "upstream timeout" },
+    { "backendId": "openrouter-tier-b", "action": "served",
+      "reason": "chat: complex question" }
+  ]
+}
+```
+
+- `backend` — the adapter that won the dispatch walk.
+- `routingPlan` — every candidate with its per-step `action` (`served` /
+  `failed` / `abandoned` / `skipped`) and the human-readable `reason` the
+  rules wrote — the same strings the console's decision log renders.
+- `fallbackTriggered` — did an earlier candidate die so a later one served.
+
+The support-assistant `meta` is the same plus the capability's context:
+retrieval entries, `confidence` and the detected intent. When the refuse gate
+fires, `meta` is all the client ever gets — `refusal: true`,
+`backend: "none"`, plan `[{backendId:"none", action:"blocked_policy"}]`, no
+`delta` at all (Stage 2b).
+
+See one live:
+
+```bash
+curl -sN http://127.0.0.1:8787/v1/chat -X POST \
+  -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \
+  -d '{"message":"what is your refund window?"}'
+# event: meta    ← the routing receipt, first
+# event: delta   ← answer chunks
+# event: final   ← metering
+```
+
+`meta` can arrive before the answer because dispatch resolves who serves
+before streaming starts — the router always knows the winner first; when the
+first candidate dies, `fallbackTriggered`/`failed` steps are what it knows
+*instead of* an answer.
+
 After the stream settles (`assistant.ts:164-218`):
 
 1. **Unusable-output guard** (the brief's "model returns something unusable"):

@@ -249,12 +249,18 @@ mid-answer becomes an explicit `error` SSE event, outcome `failed`) but is
 **never re-routed** — re-routing mid-answer would splice or duplicate
 content: correct-looking and wrong is worse than visibly broken.
 
-**Stage 5 — stream out (`lib/sse.ts`), then settle up.** The client sees
-`event: meta` *before any delta* (requestId, backend, full routingPlan —
-which is why the Playground renders "tier A, fallback fired" live), then
-`delta…`, then `final` with metering (`model, tokens, latencyMs, ttftMs,
-estimatedCostUsd, costSource — provider-reported when OpenRouter supplies
-usage, ~4-chars/token estimate otherwise`). After the stream settles:
+**Stage 5 — stream out (`lib/sse.ts`), then settle up.** The stream is a
+four-event protocol: `meta` → `delta…` → (`error?`) → `final`. `meta` — the
+*routing receipt* — arrives first, before any text: requestId, the winning
+`backend`, `fallbackTriggered`, and the full `routingPlan` with each step's
+`action` and reason. The assistant's `meta` adds retrieval + confidence +
+intent; when the refuse gate fires, `meta` is all the client ever gets (no
+delta at all). That's why the Playground renders "tier A, fallback fired"
+live, mid-stream. Then `delta…`, then `final` with metering (`model, tokens,
+latencyMs, ttftMs, estimatedCostUsd, costSource — provider-reported when
+OpenRouter supplies usage, ~4-chars/token estimate otherwise`). Full payload
+ anatomy of `meta`: [`FLOW.md`](FLOW.md), "The `meta` event — the routing
+receipt". After the stream settles:
 
 1. Unusable-output guard: an answer under 15 chars becomes `refused: true` —
    a degraded backend can't eat the tenant's request allowance, but its
