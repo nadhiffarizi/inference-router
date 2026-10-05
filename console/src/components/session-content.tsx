@@ -1,4 +1,4 @@
-import { Badge } from "./ui/badge";
+import { KeyValBadge } from "./ui/key-val-badge";
 import { outcomeBadge } from "../lib/badges";
 import { usd } from "../lib/utils";
 import { localTime } from "../lib/time";
@@ -17,10 +17,11 @@ export function SessionContent({ turns }: { turns: Turn[] }): React.ReactElement
         <div key={t.id} className="rounded-lg border p-3">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="font-mono text-[10px] text-muted-foreground">{localTime(t.createdAt)}</span>
-            <Badge variant={outcomeBadge(t.outcome)}>{t.outcome}</Badge>
-            {t.intent && <Badge variant="success">{t.intent}</Badge>}
-            <Badge variant="outline" className="font-mono text-[10px]">{t.backendId} · {t.modelId.split("/").pop()}</Badge>
-            <Badge variant="secondary" className="text-[10px]">{t.keyLabel ?? "—"}</Badge>
+            <KeyValBadge label="status" value={t.outcome} variant={outcomeBadge(t.outcome)} />
+            {t.intent && <KeyValBadge label="intent" value={t.intent} variant="success" />}
+            <KeyValBadge label="backend" value={t.backendId} variant="outline" />
+            <KeyValBadge label="model" value={t.modelId.split("/").pop() ?? "none"} variant="outline" />
+            <KeyValBadge label="auth" value={t.keyLabel ?? "none"} />
             <span className="ml-auto text-[10px] text-muted-foreground">{usd(t.costUsd)} · {t.latencyMs} ms</span>
           </div>
           <div className="space-y-2">

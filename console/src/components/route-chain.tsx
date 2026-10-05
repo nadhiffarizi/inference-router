@@ -1,5 +1,5 @@
 import { CircleMinus, CircleSlash, CircleX, CircleCheck } from "lucide-react";
-import { Badge } from "./ui/badge";
+import { KeyValBadge } from "./ui/key-val-badge";
 import { cn } from "../lib/utils";
 import { outcomeBadge } from "../lib/badges";
 
@@ -42,7 +42,7 @@ export function RouteChain({ plan }: { plan: RouteStep[] | null | undefined }): 
             <div className={cn("min-w-0", isLast ? "pb-0" : "pb-3")}>
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate font-mono text-xs" title={s.backendId}>{s.backendId}</span>
-                <Badge variant={outcomeBadge(s.action)} className="text-[10px]">{s.action}</Badge>
+                <KeyValBadge label="action" value={s.action} variant={outcomeBadge(s.action)} className="text-[10px]" />
               </div>
               <p className="text-[11px] text-muted-foreground">{s.reason}</p>
             </div>

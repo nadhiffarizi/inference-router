@@ -3,6 +3,7 @@ import { ArrowUp, KeyRound, MessageSquarePlus, MessageSquareText, Square, Sparkl
 import { deleteChatSession, fetchChatSessions, fetchSessionTimeline, postStream, type ChatSessionRow, type StreamFinal, type StreamMeta, type Turn } from "./api";
 import { useKeys } from "./keys";
 import { Badge } from "./components/ui/badge";
+import { KeyValBadge } from "./components/ui/key-val-badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input, Textarea } from "./components/ui/input";
@@ -570,13 +571,18 @@ export function Xray({ meta, final, fault, refused = false, capability = "assist
         <Card className="w-full min-w-0">
           <CardHeader><CardTitle>routing</CardTitle></CardHeader>
           <CardContent className="w-full min-w-0 space-y-2">
-            {fault && <p className="text-sm text-destructive">{fault.code}</p>}
+            {fault && (
+              <div className="flex items-center gap-2">
+                <KeyValBadge label="fault" value={fault.code} variant="destructive" />
+                <span className="min-w-0 truncate text-xs text-muted-foreground">{fault.message}</span>
+              </div>
+            )}
             {meta ? (
               <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="info">{meta.backend?.id}</Badge>
-                  {refused && <Badge variant="warning">refused</Badge>}
-                  <span className="min-w-0 font-mono text-xs text-muted-foreground" title={meta.backend?.model}>{meta.backend?.model}</span>
+                  <KeyValBadge label="backend" value={meta.backend?.id ?? "none"} variant="info" title={meta.backend?.label} />
+                  {refused && <KeyValBadge label="status" value="refused" variant="warning" />}
+                  <KeyValBadge label="model" value={meta.backend?.model ?? "none"} variant="outline" title={meta.backend?.model} />
                   {meta.fallbackTriggered ? <Badge variant="warning">fallback fired</Badge> : <Badge variant="secondary">first candidate answered</Badge>}
                 </div>
                 {/* the chain, not just the winner: answered / failed / never called, in call order */}

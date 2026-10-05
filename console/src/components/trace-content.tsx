@@ -1,4 +1,5 @@
 import { Badge } from "./ui/badge";
+import { KeyValBadge } from "./ui/key-val-badge";
 import { RouteChain } from "./route-chain";
 import { outcomeBadge } from "../lib/badges";
 import { NO_ANSWER_TEXT } from "../lib/copy";
@@ -18,16 +19,20 @@ export function TraceContent({ trace }: { trace: TracePayload }): React.ReactEle
     <>
       {/* summary badges — the run's verdict first, the routing details after the divider */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b pb-3">
-        {trace.outcome && <Badge variant={outcomeBadge(trace.outcome)}>{trace.outcome}</Badge>}
+        {trace.outcome && <KeyValBadge label="status" value={trace.outcome} variant={outcomeBadge(trace.outcome)} />}
         {trace.fallbackTriggered && <Badge variant="warning">fallback fired</Badge>}
         {trace.outcome && <span className="text-border" aria-hidden>|</span>}
         {trace.capability && (
-          <Badge variant={trace.capability === "support-assistant" ? "info" : "secondary"}>{trace.capability}</Badge>
+          <KeyValBadge
+            label="capability"
+            value={trace.capability}
+            variant={trace.capability === "support-assistant" ? "info" : "secondary"}
+          />
         )}
-        {trace.intent && <Badge variant="success">{trace.intent}</Badge>}
-        {trace.keyLabel && <Badge variant="secondary">{trace.keyLabel}</Badge>}
-        {trace.backendId && <Badge variant="outline" className="font-mono">{trace.backendId}</Badge>}
-        {trace.modelId && <Badge variant="outline" className="font-mono text-[10px]">{trace.modelId}</Badge>}
+        {trace.intent && <KeyValBadge label="intent" value={trace.intent} variant="success" />}
+        <KeyValBadge label="auth" value={trace.keyLabel ?? "none"} />
+        <KeyValBadge label="backend" value={trace.backendId ?? "none"} variant="outline" />
+        <KeyValBadge label="model" value={trace.modelId ?? "none"} variant="outline" className="text-[10px]" />
       </div>
 
       {/* the middle: turn, retrieval and routing share one scroll area, so the
