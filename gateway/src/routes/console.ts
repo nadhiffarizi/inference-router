@@ -446,7 +446,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
 
     return {
       rows, total, limit, offset,
-      facets: { tenants: names, outcomes: ["ok", "failed", "quota_denied", "refused"], capabilities: ["chat", "support-assistant"] },
+      facets: { tenants: names, outcomes: ["ok", "failed", "refused"], capabilities: ["chat", "support-assistant"] },
     };
   });
 

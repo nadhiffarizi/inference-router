@@ -70,7 +70,7 @@ export const requests = sqliteTable("requests", {
       derive from it plus the token counts (see console.ts latency metrics). */
   ttftMs: integer("ttft_ms"),
   estimatedCostUsd: real("estimated_cost_usd").notNull().default(0),
-  /** ok | refused | failed | quota_denied */
+  /** ok | refused | failed (quota denials never become rows — auth rejects pre-stream) */
   outcome: text("outcome").notNull(),
   error: text("error"),
   /** Assistant-only columns; null for plain chat. */

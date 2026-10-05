@@ -154,7 +154,7 @@ function restoredXray(t: Turn): RestoredXray {
         costSource: "", // not persisted per turn
       },
     } : null,
-    fault: t.outcome === "failed" || t.outcome === "quota_denied" ? { code: t.outcome, message: t.error ?? t.outcome } : null,
+    fault: t.outcome === "failed" ? { code: t.outcome, message: t.error ?? t.outcome } : null,
   };
 }
 

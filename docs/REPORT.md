@@ -311,6 +311,17 @@ Cut deliberately rather than half-build (**still cut**):
 - Sliding-window quotas (fixed daily window), retries beyond one fallback hop,
   WebSocket, vector retrieval / reranking, cost-calibration wizard.
 
+Measured limitation accepted on the cost line (the "metering recorded
+accurately" axis): when OpenRouter streams without a `usage` frame, the
+fallback estimate fills prompt tokens but leaves completion tokens at 0 even
+though the answer was streamed and fully counted for the caller — so the
+estimate under-bills the completion half rather than inventing precision, and
+`costSource` on the `final` event says `estimate` when it happens. A later
+empty `usage` frame would also overwrite cost with an estimate. Both are
+accepted for the demo scale (provider-supplied `cost` was present on the
+eval runs) rather than papered over; the calibration wizard above is the
+deliberate cut that would close it.
+
 Grew **on purpose** while building, each for a stated reason (full args in the
 addendum D11–D15): console accounts + one-irreplaceable-key issuance flow
 (makes tenancy and "enforces what each tenant is allowed" _demonstrable_

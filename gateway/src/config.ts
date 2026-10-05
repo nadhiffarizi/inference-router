@@ -110,7 +110,7 @@ export const config = {
     /** Lexical retrieval settings (see DECISIONS.md D7 — no embeddings by design). */
     topK: num("RETRIEVAL_TOP_K", 5),
     /** Below this normalized confidence the assistant refuses instead of guessing.
-     *  Calibrated against probe data: on-KB ≈ 0.48–0.79, off-KB ≈ 0.04–0.37 (rag/kb.ts). */
+     *  Calibrated against probe data: on-KB ≈ 0.52–0.91, off-KB ≈ 0.12–0.38 (rag/kb.ts). */
     refuseBelowConfidence: num("RETRIEVAL_REFUSE_BELOW", 0.48),
     /**
      * Below this the retrieval is labelled "weak" and the capable tier (B)

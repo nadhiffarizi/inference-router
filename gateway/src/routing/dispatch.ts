@@ -8,7 +8,8 @@ import type { Candidate } from "./rules.js";
  * returned so the route layer can persist and expose it.
  *
  * Boundary honoured here (declared in DECISIONS.md D5/D10): fallback applies
- * until the first byte. Once a backend has started streaming to the client,
+ * until the first content delta. Once a backend has started streaming to the
+ * client,
  * a mid-stream failure is surfaced as an error event — re-routing mid-answer
  * would duplicate or splice content, i.e. be correct-looking and wrong.
  */
@@ -41,9 +42,25 @@ export async function openWithFallback(plan: Candidate[], streamReq: StreamReque
       // must arrive inside the adapter's timeout budget, including the first
       // ("too slow → fallback" in the brief). learned the hard way: a
       // generator awaiting an internal sleep ignores the fetch AbortController.
-      const first = await nextWithTimeout(iter, cand.adapter.meta.timeoutMs, cand.adapter.meta.id);
-      if (first.done) {
-        steps.push({ backendId: cand.adapter.meta.id, action: "abandoned", reason: "stream ended without output" });
+      // Consume pre-delta events until the first piece of content. Fallback
+      // applies until the first DELTA, not the first event: adapters end with
+      // a done event even after zero deltas, so a success-shaped empty stream
+      // must fall through to the next candidate — marking it served here
+      // burned the whole plan and left the caller a refusal while tier B had
+      // the answer.
+      const preDelta: StreamEvent[] = [];
+      let firstDelta: StreamEvent | undefined;
+      while (!firstDelta) {
+        const r = await nextWithTimeout(iter, cand.adapter.meta.timeoutMs, cand.adapter.meta.id);
+        if (r.done) break;
+        if (r.value.type === "delta") {
+          firstDelta = r.value;
+          break;
+        }
+        preDelta.push(r.value);
+      }
+      if (!firstDelta) {
+        steps.push({ backendId: cand.adapter.meta.id, action: "abandoned", reason: "stream completed without output" });
         lastError = `${cand.adapter.meta.id}: empty stream`;
         continue;
       }
@@ -57,7 +74,7 @@ export async function openWithFallback(plan: Candidate[], streamReq: StreamReque
         ok: true,
         chosen: cand.adapter,
         fallbackTriggered,
-        stream: guardedStream(iter, first, cand.adapter.meta),
+        stream: guardedStream(iter, firstDelta, preDelta, cand.adapter.meta),
         steps: steps.concat(notReachedSteps(plan, steps.length, cand.adapter.meta.id)),
       };
     } catch (err) {
@@ -105,10 +122,14 @@ async function nextWithTimeout(
  */
 async function* guardedStream(
   iter: AsyncGenerator<StreamEvent, void, unknown>,
-  first: IteratorResult<StreamEvent, void>,
+  firstDelta: StreamEvent,
+  preDelta: StreamEvent[],
   meta: AdapterMeta,
 ): AsyncGenerator<StreamEvent, void, unknown> {
-  if (!first.done && first.value) yield first.value;
+  // Re-emit events that arrived before the first delta (usage frames, today
+  // none — but dropping adapter events silently would strand usage metering).
+  for (const e of preDelta) yield e;
+  yield firstDelta;
   if (meta.tier === "mock") { // scripted mock delays are part of its contract
     yield* iter;
     return;
@@ -118,14 +139,6 @@ async function* guardedStream(
     if (r.done) return;
     yield r.value;
   }
-}
-
-async function* prefixStream(
-  rest: AsyncGenerator<StreamEvent, void, unknown>,
-  first: IteratorResult<StreamEvent, void>,
-): AsyncGenerator<StreamEvent, void, unknown> {
-  if (!first.done && first.value) yield first.value;
-  yield* rest;
 }
 
 export function adapterRegistry(adapters: ModelAdapter[]): Map<string, ModelAdapter> {

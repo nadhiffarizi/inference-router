@@ -59,7 +59,7 @@ export type RetrievedEntry = KbEntry & { score: number };
  * concentration: legit support questions retrieve entries that AGREE on one
  * intent; generic mush scatters across intents. Blended = strength ×
  * (0.5 + 0.5 × intentConcentration) separates the classes:
- *   on-KB ≈ 0.48–0.79, off-KB ≈ 0.04–0.37 → refusal floor 0.42.
+ *   on-KB ≈ 0.52–0.91, off-KB ≈ 0.12–0.38 → refusal floor 0.48 (RETRIEVAL_REFUSE_BELOW).
  *
  * This confidence is the same number that drives routing (DECISIONS.md D5):
  * one signal, two decisions (which tier serves, whether to refuse).

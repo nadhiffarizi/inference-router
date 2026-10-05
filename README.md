@@ -55,6 +55,7 @@ cp gateway/.env.example gateway/.env      # add OPENROUTER_API_KEY + tier model 
 npm run build:kb                          # Bitext slice → 324 KB rows + 30 held-out eval cases
 npm run dev                               # gateway on :8787
 cd console && npm run dev                 # console on :5173 (proxies /v1)
+npm run test --workspace gateway          # gateway failure-path suite (quota, auth, fallback)
 ```
 
 Seeded demo accounts (shared for this assessment, password `mekari-demo-2026`):

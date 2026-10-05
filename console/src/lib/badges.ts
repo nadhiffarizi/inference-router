@@ -17,7 +17,6 @@ export const OUTCOME_BADGES: Record<string, BadgeVariant> = {
   error: "destructive",
   abandoned: "destructive",
   skipped: "secondary",
-  quota_denied: "warning",
 };
 
 export function outcomeBadge(outcome: string | undefined | null): BadgeVariant {

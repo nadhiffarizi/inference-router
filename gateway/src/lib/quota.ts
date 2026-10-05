@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { quotaUsage, requests } from "../db/schema.js";
+import { errors } from "./errors.js";
 
 /**
  * Fixed-window (UTC day) quota. Deliberately simple (DECISIONS.md D10).
@@ -79,7 +80,11 @@ export async function checkQuota(
     return { allowed: true, used };
   } catch (err) {
     // Fail closed: a quota system that cannot verify should deny, not assume.
-    throw new Error(`quota check failed: ${err instanceof Error ? err.message : String(err)}`);
+    // GatewayError so the caller sees 503 quota_uncertain, not 500 internal —
+    // "closed with a clear error" is the request path contract (DECISIONS.md).
+    throw errors.quotaUncertain(
+      `quota check failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

@@ -27,7 +27,7 @@ export type MeteredResult = {
   /** Time to first token, ms from request start; absent when none streamed. */
   ttftMs?: number;
   estimatedCostUsd: number;
-  outcome: "ok" | "refused" | "failed" | "quota_denied";
+  outcome: "ok" | "refused" | "failed";
   error?: string;
   retrievedCount?: number;
   intent?: string;

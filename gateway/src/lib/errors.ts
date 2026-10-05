@@ -23,7 +23,6 @@ export type ErrorCode =
   | "quota_uncertain"
   | "backend_unavailable"
   | "model_output_unusable"
-  | "low_confidence_refusal"
   | "internal";
 
 export const errors = {
@@ -38,8 +37,6 @@ export const errors = {
   backendUnavailable: (message: string, details?: Record<string, unknown>) =>
     new GatewayError(502, "backend_unavailable", message, details),
   modelOutputUnusable: (message: string) => new GatewayError(502, "model_output_unusable", message),
-  lowConfidenceRefusal: (message: string, details?: Record<string, unknown>) =>
-    new GatewayError(200, "low_confidence_refusal", message, details), // refusal is a 200 with outcome, by design
   internal: (message: string) => new GatewayError(500, "internal", message),
 };
 
