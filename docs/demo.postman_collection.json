@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Inference Router — assessment demo (tier 1)",
-    "description": "The curl-driven case set from docs/REPORT.md §8–§10, as an importable collection.\n\nTwo variables to set before running (collection ⚙ → Variables):\n  baseUrl — the gateway origin (default: the live deployment)\n  apiKey  — your issued key (Console → API Keys; the plaintext was shown at issue)\n\nStreaming routes answer with SSE: the first `event: meta` carries backend,\nfallbackTriggered and the full routingPlan; `event: final` carries metering +\nquota. Confirm each decision visually afterwards in the console (Playground\nX-ray live, Observability → routing decisions for the record).\n\nOperator scenes (fallback via ROUTING_CHAIN/MOCK failure modes, upstream\noutage, unusable output) are NOT in this collection — they need an env change\n+ restart; see REPORT.md §10.2.",
+    "description": "The curl-driven case set from docs/REPORT.md sections 8–10, as an importable collection.\n\nTwo variables to set before running (collection ⚙ → Variables):\n  baseUrl — the gateway origin (default: the live deployment)\n  apiKey  — the key from admin@demo.local (Console → API Keys; reveal and copy it on the key card)\n\nStreaming routes answer with SSE: the first `event: meta` carries backend,\nfallbackTriggered and the full routingPlan; `event: final` carries metering +\nquota. Confirm each decision visually afterwards in the console (Playground\nX-ray live, Observability → routing decisions for the record).\n\nOperator scenes (fallback via ROUTING_CHAIN/MOCK failure modes, upstream\noutage) are NOT in this collection — they need an env change\n+ restart; see REPORT.md section 10.2.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -157,7 +157,7 @@
       ]
     },
     {
-      "name": "B — refuse / quota / validation / auth",
+      "name": "B — refuse / quota / auth / validation",
       "item": [
         {
           "name": "B1 refusal · conf < 0.48, no model call",

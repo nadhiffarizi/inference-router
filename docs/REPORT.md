@@ -364,12 +364,11 @@ in; the mock is never picked by policy (only via 5/7).
 |---|------|---------|---------------|---------|
 | 1 | Refuse — low confidence | conf < 0.48 (e.g. *"is the moon made of cheese?"* ≈ 0.37) | none | `refused: true`, cost 0, outcome `refused`, still consumes a request slot (`bumpQuota(id, 0)`) |
 | 2 | Refuse — complex + low conf | complexity high **and** conf < 0.48 | none | refused before routing — tier B never reached even for complex questions |
-| 3 | Refuse — unusable output | answer < 15 chars after trim (14 → refused; 15 → served; whitespace-only refused) | yes, then discarded | converted to refusal; token/request counters not bumped, USD spend still recorded |
-| 4 | Fallback → next tier | candidate error / stall past timeout (A 8s, B 20s, mock 6s) / empty stream, before first byte | yes, then next | failed/abandoned step → next serves, `fallbackTriggered: true`; unreached tail recorded `skipped` |
-| 5 | Quota — requests | used+1 > requestsPerDay (`stress`: 3/day crossed over a few calls; `quota-zero`: 0/day denies on request #1) | none | 429 `quota_exceeded` + `{limit, used, reset}` |
-| 6 | Auth — unknown/foreign key | wrong key; keys are SHA-256 at rest, one key = one tenant | none | 401 |
-| 7 | Validation | empty message, >4000 chars, unknown field | none | 400 `invalid_input` (schema, `additionalProperties: false`) |
-| 8 | Upstream outage | both tiers unreachable | tried both | 502 `backend_unavailable` — full plan in body |
+| 3 | Fallback → next tier | candidate error / stall past timeout (A 8s, B 20s, mock 6s) / empty stream, before first byte | yes, then next | failed/abandoned step → next serves, `fallbackTriggered: true`; unreached tail recorded `skipped` |
+| 4 | Quota — requests | used+1 > requestsPerDay (`stress`: 3/day crossed over a few calls; `quota-zero`: 0/day denies on request #1) | none | 429 `quota_exceeded` + `{limit, used, reset}` |
+| 5 | Auth — unknown/foreign key | wrong key; keys are SHA-256 at rest, one key = one tenant | none | 401 |
+| 6 | Validation | empty message, >4000 chars, unknown field | none | 400 `invalid_input` (schema, `additionalProperties: false`) |
+| 7 | Upstream outage | both tiers unreachable | tried both | 502 `backend_unavailable` — full plan in body |
 
 ### 8.2 Full coverage vs this set — what is NOT demoed, and why
 
@@ -377,21 +376,21 @@ in; the mock is never picked by policy (only via 5/7).
 |---|---|---|
 | confidence boundary, conf **exactly** 0.48 | retrieval confidence is a continuous score — no question reliably lands on 0.480; a boundary request would be luck, not a case | the floor's two neighbourhoods ARE demoed: 0.37 refuses (B1), 0.50 routes weak (A4), 0.80 routes strong (A3); comparator cited (`rules.ts`, `assistant.ts` refusal gate) |
 | quota — tokens/day and USD budget axes | same `checkQuota` code path with the identical 429 shape (`quota.ts:66-77`); demoing one axis is the whole fail-closed story, and the spend axis moves ~1e-4 USD per request — nearly invisible in a live demo (`budgetUsdPerDay: 0.7`) | eval + observability data carry the axes; `FLOW.md` documents the counters |
-| quota boundary semantics (#200 allowed, #201 denied) | implicit in B5 — the check `used + 1 > limit` is quoted rather than staged as a separate scene | `quota.ts` + the 429 body's own `limit`/`used` fields prove the semantics |
+| quota boundary semantics (#200 allowed, #201 denied) | implicit in B4 — the check `used + 1 > limit` is quoted rather than staged as a separate scene | `quota.ts` + the 429 body's own `limit`/`used` fields prove the semantics |
 | quota concurrency race (two requests passing check-then-bump) | non-deterministic — needs a parallel fire to demonstrate, and its absence/presence is not a graded behaviour; single-instance SQLite check-then-bump is not atomic and is listed as a known limitation instead | section 7 limitation + `lib/quota.ts`; the atomic-reserve fix is proposed, deferred |
-| quota DB down → `503 quota_uncertain` | needs the in-process SQLite broken mid-run; there is no honest lever for it, and faking the DB failure would misrepresent more than it proves | branch is code-auditable (`lib/quota.ts:80-84`, `plugins/auth.ts`) and the fail-closed posture is shown by B5–B7 instead |
-| missing Authorization header (401) | not dropped on merit — omitted as redundant with the unknown-key curl (B6); same fail-closed auth, same `{error:{code,message}}` shape | the unknown-key case B6 demonstrates the identical shape; it is the trivially cheap extra curl if wanted |
+| quota DB down → `503 quota_uncertain` | needs the in-process SQLite broken mid-run; there is no honest lever for it, and faking the DB failure would misrepresent more than it proves | branch is code-auditable (`lib/quota.ts:80-84`, `plugins/auth.ts`) and the fail-closed posture is shown by B4–B6 instead |
+| missing Authorization header (401) | not dropped on merit — omitted as redundant with the unknown-key curl (B5); same fail-closed auth, same `{error:{code,message}}` shape | the unknown-key case B5 demonstrates the identical shape; it is the trivially cheap extra curl if wanted |
 | complexity boundary, 240 vs 241 chars | the boundary IS the rule shown by A1 vs A2 — a third request one character longer adds a scene without adding a failure shape; substring/case semantics cited from code (`rules.ts` `questionComplexity`) | A1/A2 pair; boundary constants quoted |
 | mid-stream fault (error after first byte) | no on-demand trigger exists: the mock can only fail *before* first byte, and real provider faults aren't scriptable to a scene; would need a mock `midstream` mode (env-only today) — rejected to keep the demo zero-new-code | the boundary is documented and code-pinned (`routing/dispatch.ts` `guardedStream` — error event, never re-routing/splice) and the SSE shapes are in `FLOW.md` |
-| **unusable output** | **kept in the set (B3), but it is the one row demoed as "explained, not demonstrated"** — there is no per-request trigger: the assistant's output cap is server-fixed (500 tokens) with a grounding prompt that demands 2–5 sentences, and the mock answers long | the guard is code-pinned (`routes/assistant.ts` unusable-output branch), its billing asymmetry is documented, and refusal copy is env-configured; a mock `short` mode would make it on-demand and is the one candidate to add later |
-| upstream outage (B8) and `ROUTING_CHAIN` (A7) | kept, but they are **operator scenes, not assessor clicks** — both need an env change + container restart (`OPENROUTER_BASE_URL` → dead port; `ROUTING_CHAIN` + `MOCK_FAILURE_MODE`) | listed in the runbook below; see the `ROUTING_CHAIN`/hung-backend traces already recorded in the decision log (section 4) |
+| unusable output (answer < 15 chars after trim) | **dropped — not demoable**: there is no per-request trigger; the assistant's output cap is server-fixed (500 tokens) with a grounding prompt that demands 2–5 sentences, and the mock answers long — a request cannot honestly be made to fail this way (a mock `short` mode would make it on-demand and is the one candidate to add later) | the guard is code-pinned (`routes/assistant.ts` unusable-output branch); its billing asymmetry (request/token counters not bumped, USD spend still recorded) is in section 5's failure map; refusal copy is env-configured |
+| upstream outage (B7) and `ROUTING_CHAIN` (A7) | kept, but they are **operator scenes, not assessor clicks** — both need an env change + container restart (`OPENROUTER_BASE_URL` → dead port; `ROUTING_CHAIN` + `MOCK_FAILURE_MODE`) | listed in the runbook below; see the `ROUTING_CHAIN`/hung-backend traces already recorded in the decision log (section 4) |
 
 ### 8.3 Two tiers for running the set
 
 | tier | who | how |
 |---|---|---|
-| 1 — assessor-driven | any issued key, Postman/curl only | all of A (minus A7) and B1–B7: payloads are fixed, responses are the evidence, Observability replays each decision |
-| 2 — operator scenes | the deployer, env → `docker compose up -d` → fire → revert | B8 (dead base URL), A7 fallback demo (`ROUTING_CHAIN=mock,openrouter-tier-a` + `MOCK_FAILURE_MODE=hang/fail`), and B3 if a mock `short` mode is ever added |
+| 1 — assessor-driven | the key from `admin@demo.local` (console → API Keys; it stays revealable/copyable there) plus the two quota fixture keys, Postman/curl only | all of A (minus A7) and B1, B2, B4, B5, B6: payloads are fixed, responses are the evidence, Observability replays each decision |
+| 2 — operator scenes | the deployer, env → `docker compose up -d` → fire → revert | B7 (dead base URL) and B3 (fallback: `ROUTING_CHAIN=mock,openrouter-tier-a` + `MOCK_FAILURE_MODE=hang/fail`) |
 
 Tier 2 exists for the recorded walkthrough where cuts can hide the restart;
 tier 1 is what an assessor runs independently. The full case coverage lives
@@ -416,16 +415,22 @@ assessor should look to check the claim.
 Setup (Postman equivalent: import
 [`demo.postman_collection.json`](demo.postman_collection.json) and set the
 collection variables `baseUrl`, `apiKey` — the fixture key for the quota case
-is pre-filled):
+is pre-filled). **Which key the assessor uses: log in to the console as
+`admin@demo.local` (password `mekari-demo-2026`, section 0), open
+`API Keys`, and copy `ops-key` — it stays revealable/copyable on the card.**
+That account's tenant has 500 req/day headroom for every tier-1 case, and the
+same login gives Observability to verify the trail afterwards. The only
+requests that use other keys are the quota cases, which have their own
+fixtures:
 
 ```bash
-# 1) base + key — the assessor uses their own issued key (console → API Keys)
+# 1) base + key — the admin@demo.local key copied from console → API Keys
 BASE=https://router.kreasiodigital.com          # or http://127.0.0.1:4000
-KEY=sk_…your_key
+KEY=sk_…the ops-key copied from admin@demo.local's key card
 AUTH="Authorization: Bearer $KEY"
 CT="Content-Type: application/json"
 # fixtures for the quota case: STRESS crosses a 3 req/day limit over a few
-# calls; ZERO (quota-zero tenant, 0 req/day) denies on request #1 — see B5/B5b
+# calls; ZERO (quota-zero tenant, 0 req/day) denies on request #1 — see B4/B4b
 STRESS=sk_stress_key_0000000000000000
 ZERO=sk_zero_key_0000000000000000
 ```
@@ -480,7 +485,7 @@ curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
 #   ~4 hint words → complex shape; conf ≈ 0.17 (measured) < 0.48
 #   meta: refusal true, plan [{backendId:"none", action:"blocked_policy"}]
 
-## B5 — quota: the 3-requests/day fixture tenant; fire until the 429
+## B4 — quota: the 3-requests/day fixture tenant; fire until the 429
 for i in 1 2 3 4 5; do
   curl -s -o /dev/null -w "request $i → HTTP %{http_code}\n" \
     "$BASE/v1/support-assistant" -X POST \
@@ -492,30 +497,28 @@ done
 #   step at which it lands depends on today's use of the fixture key — a fresh
 #   midnight gives exactly 3 × 200 then 429 on the 4th.
 
-## B5b — quota, instant variant: the quota-zero fixture denies on request #1
+## B4b — quota, instant variant: the quota-zero fixture denies on request #1
 curl -s "$BASE/v1/support-assistant" -X POST \
   -H "Authorization: Bearer $ZERO" -H "$CT" -d '{"message":"hi"}'
 #   HTTP 429 quota_exceeded on the very first call (used+1 > 0) — the same
-#   fail-closed behaviour B5 walks up to, with no sequence needed. Console
+#   fail-closed behaviour B4 walks up to, with no sequence needed. Console
 #   demo: log in as zero@demo.local, connect the Playground with the ZERO
 #   key, send one message → quota_exceeded in the chat bubble and the X-ray.
 
-## B6 — auth fails closed: unknown key, and no header at all (same shape)
+## B5 — auth fails closed: unknown key, and no header at all (same shape)
 curl -s "$BASE/v1/support-assistant" -X POST \
   -H "Authorization: Bearer sk_not_a_real_key_at_all" -H "$CT" -d '{"message":"hi"}'
 #   HTTP 401 {"error":{"code":"unauthorized","message":"Unknown API key."}}
 curl -s "$BASE/v1/support-assistant" -X POST -H "$CT" -d '{"message":"hi"}'
 #   HTTP 401 — missing header, identical body shape
 
-## B7 — validation: >4000 chars, and an unknown field (schema is strict)
+## B6 — validation: >4000 chars, and an unknown field (schema is strict)
 curl -s "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
   -d "{\"message\":\"$(printf 'x%.0s' $(seq 1 4001))\"}"
 #   HTTP 400 invalid_input (length violation)
 curl -s "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
   -d '{"message":"hi","unexpectedField":true}'
 #   HTTP 400 invalid_input (additionalProperties: false)
-
-## B3 — unusable output: EXPLAINED, NOT DEMOED (no on-demand trigger — see section 8.2)
 ```
 
 Verify the trail afterwards: **Observability** (admin) or **Usage → routing
@@ -525,7 +528,7 @@ reasons must match what the response just streamed.
 ### 10.2 Tier 2 — operator scenes (env change → restart → fire → revert)
 
 ```bash
-## A7 + B4 — fallback: mock first, scripted stall → router timeout → tier A
+## A7 + B3 — fallback: mock first, scripted stall → router timeout → tier A
 #   in docker-compose.yml environment add:
 #     ROUTING_CHAIN: "mock,openrouter-tier-a"
 #     MOCK_FAILURE_MODE: "hang"          # or "fail" for the hard-error variant
@@ -536,7 +539,7 @@ curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
 #   fallbackTriggered: true
 #   → then remove both lines and: docker compose up -d
 
-## B8 — upstream outage: both real tiers unreachable → 502, never a hang
+## B7 — upstream outage: both real tiers unreachable → 502, never a hang
 #   temporarily set: OPENROUTER_BASE_URL=http://127.0.0.1:9
 docker compose up -d
 curl -sN "$BASE/v1/support-assistant" -X POST -H "$AUTH" -H "$CT" \
