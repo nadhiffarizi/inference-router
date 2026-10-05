@@ -132,6 +132,12 @@ async function main(): Promise<void> {
     trustProxy: true, // behind NGINX — req.protocol/ip come from the proxy
     genReqId: () => randomUUID(),
     bodyLimit: 1 * 1024 * 1024,
+    // Fastify's Ajv default is removeAdditional:true — it SILENTLY STRIPS
+    // fields the schema didn't declare, so "additionalProperties: false"
+    // never produced the 400 the failure map promises (verified live:
+    // an unknown field streamed a full response). Strict means strict:
+    // unknown props are a validation failure, not a hint to tidy up.
+    ajv: { customOptions: { removeAdditional: false } },
   });
   await app.register(cors, { origin: true });
   await app.register(cookie, {});

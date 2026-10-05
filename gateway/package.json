@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "build:kb": "tsx src/scripts/buildKb.ts",
-    "test": "node --import tsx --test src/routing/dispatch.test.ts src/lib/quota.test.ts"
+    "test": "node --import tsx --test src/routing/dispatch.test.ts src/lib/quota.test.ts src/routes/http-validation.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
