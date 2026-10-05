@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql, type SQLWrapper } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { db } from "../db/index.js";
@@ -155,6 +155,29 @@ function pageParams(req: FastifyRequest): PageParams {
     offset: Math.max(0, Number(p.offset) || 0),
     tenant: p.tenant?.trim() || undefined,
   };
+}
+
+/**
+ * Day-range filter (the observability pages' date pickers): `from`/`to` as
+ * YYYY-MM-DD in UTC — timestamps are stored as UTC ISO text, so the inclusive
+ * day range is two string-slice comparisons, no parsing. A malformed value is
+ * ignored rather than 400ing — a query param is a view preference, not data
+ * the caller depends on.
+ */
+function dayRangeParams(p: { from?: string; to?: string }): { from: string | undefined; to: string | undefined } {
+  const DATE = /^\d{4}-\d{2}-\d{2}$/;
+  const from = DATE.test(p.from?.trim() ?? "") ? p.from!.trim() : undefined;
+  const to = DATE.test(p.to?.trim() ?? "") ? p.to!.trim() : undefined;
+  if (from && to && from > to) return { from: to, to: from }; // swapped pickers read as intended, not as empty
+  return { from, to };
+}
+
+function dayRangeConditions(col: AnySQLiteColumn, range: { from: string | undefined; to: string | undefined }): SQLWrapper[] {
+  const day = sql<string>`substr(${col}, 1, 10)`;
+  if (range.from && range.to) return [sql`${day} >= ${range.from}`, sql`${day} <= ${range.to}`];
+  if (range.from) return [sql`${day} >= ${range.from}`];
+  if (range.to) return [sql`${day} <= ${range.to}`];
+  return [];
 }
 
 /** The console surfaces tenant *names*; the tables key on ids. */
@@ -397,7 +420,12 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     const outcome = p.outcome?.trim() || undefined;
     const capability = p.capability?.trim() || undefined;
     const { ids, names } = await tenantIdFilter(tenant);
-    const conditions = [inArray(requests.tenantId, ids.length ? ids : [-1])];
+    const conditions = [
+      inArray(requests.tenantId, ids.length ? ids : [-1]),
+      // the keys endpoint's "today" filter is deliberately absent here: the
+      // activity page takes a caller-picked day range instead
+      ...dayRangeConditions(requests.createdAt, dayRangeParams(p)),
+    ];
     if (q) {
       conditions.push(
         or(
@@ -456,7 +484,11 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     const { q, limit, offset, tenant } = pageParams(req);
     const { ids, names } = await tenantIdFilter(tenant);
     const state = p.state === "active" || p.state === "deleted" ? p.state : undefined;
-    const conditions = [inArray(chatSessions.tenantId, ids.length ? ids : [-1])];
+    const conditions = [
+      inArray(chatSessions.tenantId, ids.length ? ids : [-1]),
+      // range on creation time — the same field the sessions chart buckets
+      ...dayRangeConditions(chatSessions.createdAt, dayRangeParams(p)),
+    ];
     if (q) conditions.push(or(like(chatSessions.title, `%${q}%`), like(chatSessions.externalId, `%${q}%`))!);
     if (state === "active") conditions.push(isNull(chatSessions.deletedAt));
     if (state === "deleted") conditions.push(isNotNull(chatSessions.deletedAt));
@@ -496,7 +528,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     const { q, limit, offset, tenant } = pageParams(req);
     const { ids, names } = await tenantIdFilter(tenant);
     const capability = p.capability?.trim() || undefined;
-    const conditions = [inArray(routingDecisions.tenantId, ids.length ? ids : [-1])];
+    const conditions = [inArray(routingDecisions.tenantId, ids.length ? ids : [-1]), ...dayRangeConditions(routingDecisions.createdAt, dayRangeParams(p))];
     if (q) conditions.push(or(like(routingDecisions.requestId, `%${q}%`), like(routingDecisions.chosenBackendId, `%${q}%`))!);
     if (capability) conditions.push(eq(routingDecisions.capability, capability));
     if (p.fallback === "fired") conditions.push(eq(routingDecisions.fallbackTriggered, true));
@@ -625,12 +657,21 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     }
 
     // time domains
-    const stepMs = window === "30d" ? 86_400_000 : 3_600_000;
-    const spanMs = window === "30d" ? 30 * stepMs : 24 * stepMs;
-    const bucketLen = window === "30d" ? 10 : 13; // YYYY-MM-DD | YYYY-MM-DDTHH
+    /** Bucket geometry: the window presets are relative to now; an explicit
+        from/to day range (the pages' date pickers) wins and is anchored to
+        its own day boundaries — hourly if the span is ≤ 2 days, else daily. */
+    const range = dayRangeParams(p);
+    const explicit = range.from !== undefined || range.to !== undefined;
+    const stepMs = explicit
+      ? (Date.parse(`${range.to ?? range.from}T00:00:00Z`) - Date.parse(`${range.from ?? range.to}T00:00:00Z`)) / 86_400_000 <= 2 ? 3_600_000 : 86_400_000
+      : window === "30d" ? 86_400_000 : 3_600_000;
+    const bucketLen = stepMs === 86_400_000 ? 10 : 13; // YYYY-MM-DD | YYYY-MM-DDTHH
+    const startMs = explicit
+      ? Date.parse(`${range.from ?? range.to}T00:00:00Z`)
+      : Date.now() - (stepMs === 86_400_000 ? 29 * stepMs : 23 * stepMs);
+    const endMs = explicit ? Date.parse(`${range.to ?? range.from}${bucketLen === 13 ? "T23:00:00Z" : "T00:00:00Z"}`) : Date.now();
     const buckets: string[] = [];
-    const now = Date.now();
-    for (let t = now - spanMs + stepMs; t <= now; t += stepMs) {
+    for (let t = startMs; t <= endMs; t += stepMs) {
       buckets.push(new Date(t).toISOString().slice(0, bucketLen));
     }
     const from = buckets[0]!;

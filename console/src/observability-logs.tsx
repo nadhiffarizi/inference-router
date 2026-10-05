@@ -5,7 +5,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "./components/ui/table";
 import {
-  FilterSelect, LogShell, Pager, SearchBox, useApiList, useDebounced, type Paged,
+  DateRangeFilter, FilterSelect, LogShell, Pager, SearchBox, useApiList, useDebounced, type Paged,
 } from "./components/log-explorer";
 import { TraceSheet, SessionSheet } from "./components/trace-drawers";
 import type { TracePayload } from "./components/trace-dialog";
@@ -87,13 +87,16 @@ export function ActivityLogPage(): React.ReactElement {
   const [tenant, setTenant] = useState("");
   const [outcome, setOutcome] = useState("");
   const [capability, setCapability] = useState("");
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  const setRange = (from: string, to: string) => { setRangeFrom(from); setRangeTo(to); };
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [offset, setOffset] = useState(0);
   const [openTrace, setOpenTrace] = useState<TracePayload | null>(null);
 
-  const url = `/v1/console/observability/activity?${buildQuery({ q, tenant, outcome, capability, limit, offset })}`;
+  const url = `/v1/console/observability/activity?${buildQuery({ q, tenant, outcome, capability, from: rangeFrom, to: rangeTo, limit, offset })}`;
   // any filter change collapses back to page one
-  useEffect(() => setOffset(0), [q, tenant, outcome, capability, limit]);
+  useEffect(() => setOffset(0), [q, tenant, outcome, capability, rangeFrom, rangeTo, limit]);
   const { data, error, loading } = useApiList<Paged<ActivityRow>>(url);
 
   return (
@@ -105,15 +108,16 @@ export function ActivityLogPage(): React.ReactElement {
           { key: "tokens", label: "tokens" },
           { key: "costUsd", label: "cost" },
         ]}
-        filters={{ q, tenant, outcome, capability }}
+        filters={{ q, tenant, outcome, capability, from: rangeFrom, to: rangeTo }}
       />
-      <LatencyChart filters={{ q, tenant, outcome, capability }} />
+      <LatencyChart filters={{ q, tenant, outcome, capability, from: rangeFrom, to: rangeTo }} />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={qInput} onChange={setQInput} placeholder="question, request id, model, key…" />
           <TenantSelect tenants={data?.facets.tenants} value={tenant} onChange={setTenant} />
           <FilterSelect value={outcome} onChange={setOutcome} options={data?.facets.outcomes ?? []} allLabel="any outcome" />
           <FilterSelect value={capability} onChange={setCapability} options={data?.facets.capabilities ?? []} allLabel="any capability" />
+          <DateRangeFilter from={rangeFrom} to={rangeTo} onChange={setRange} />
           <LimitSelect value={limit} onChange={setLimit} />
         </div>
       </Card>
@@ -195,12 +199,15 @@ export function SessionsLogPage(): React.ReactElement {
   const q = useDebounced(qInput);
   const [tenant, setTenant] = useState("");
   const [state, setState] = useState("");
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  const setRange = (from: string, to: string) => { setRangeFrom(from); setRangeTo(to); };
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [offset, setOffset] = useState(0);
   const [openUid, setOpenUid] = useState<number | null>(null);
 
-  const url = `/v1/console/observability/sessions?${buildQuery({ q, tenant, state, limit, offset })}`;
-  useEffect(() => setOffset(0), [q, tenant, state, limit]);
+  const url = `/v1/console/observability/sessions?${buildQuery({ q, tenant, state, from: rangeFrom, to: rangeTo, limit, offset })}`;
+  useEffect(() => setOffset(0), [q, tenant, state, rangeFrom, rangeTo, limit]);
   const { data, error, loading } = useApiList<Paged<SessionRow>>(url);
 
   return (
@@ -208,14 +215,15 @@ export function SessionsLogPage(): React.ReactElement {
       <LogChart
         domain="sessions"
         metrics={[{ key: "sessions", label: "created" }]}
-        filters={{ q, tenant, state }}
-        note="sessions created, by creation time"
+        filters={{ q, tenant, state, from: rangeFrom, to: rangeTo }}
+        note={rangeFrom || rangeTo ? "sessions created in the picked range" : "sessions created, by creation time"}
       />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={qInput} onChange={setQInput} placeholder="first question or session_id…" />
           <TenantSelect tenants={data?.facets.tenants} value={tenant} onChange={setTenant} />
           <FilterSelect value={state} onChange={setState} options={data?.facets.state ?? []} allLabel="any state" />
+          <DateRangeFilter from={rangeFrom} to={rangeTo} onChange={setRange} label="created" />
           <LimitSelect value={limit} onChange={setLimit} />
         </div>
       </Card>
@@ -287,11 +295,14 @@ export function DecisionsLogPage(): React.ReactElement {
   const [tenant, setTenant] = useState("");
   const [capability, setCapability] = useState("");
   const [fallback, setFallback] = useState("");
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  const setRange = (from: string, to: string) => { setRangeFrom(from); setRangeTo(to); };
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [offset, setOffset] = useState(0);
 
-  const url = `/v1/console/observability/decisions?${buildQuery({ q, tenant, capability, fallback, limit, offset })}`;
-  useEffect(() => setOffset(0), [q, tenant, capability, fallback, limit]);
+  const url = `/v1/console/observability/decisions?${buildQuery({ q, tenant, capability, fallback, from: rangeFrom, to: rangeTo, limit, offset })}`;
+  useEffect(() => setOffset(0), [q, tenant, capability, fallback, rangeFrom, rangeTo, limit]);
   const { data, error, loading } = useApiList<Paged<DecisionRow>>(url);
 
   return (
@@ -302,7 +313,7 @@ export function DecisionsLogPage(): React.ReactElement {
           { key: "requests", label: "decisions" },
           { key: "fallbacks", label: "fallbacks" },
         ]}
-        filters={{ q, tenant, capability, fallback }}
+        filters={{ q, tenant, capability, fallback, from: rangeFrom, to: rangeTo }}
       />
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -310,6 +321,7 @@ export function DecisionsLogPage(): React.ReactElement {
           <TenantSelect tenants={data?.facets.tenants} value={tenant} onChange={setTenant} />
           <FilterSelect value={capability} onChange={setCapability} options={["chat", "support-assistant"]} allLabel="any capability" />
           <FilterSelect value={fallback} onChange={setFallback} options={data?.facets.fallback ?? []} allLabel="fallback: any" />
+          <DateRangeFilter from={rangeFrom} to={rangeTo} onChange={setRange} label="decided" />
           <LimitSelect value={limit} onChange={setLimit} />
         </div>
       </Card>

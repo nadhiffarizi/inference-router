@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { linkProps } from "../router";
@@ -128,6 +128,51 @@ export function FilterSelect({
         <option key={o} value={o}>{o}</option>
       ))}
     </select>
+  );
+}
+
+/** Day range (native calendar pickers), inclusive both ends — drives the
+    table and the charts above it, which re-bucket to the picked span
+    (hourly ≤ 2 days, otherwise daily). Values are YYYY-MM-DD; "" = unbounded. */
+export function DateRangeFilter({
+  from, to, onChange, label = "dates",
+}: {
+  from: string;
+  to: string;
+  onChange: (from: string, to: string) => void;
+  label?: string;
+}): React.ReactElement {
+  const active = from !== "" || to !== "";
+  return (
+    <label className={cn("flex h-9 items-center gap-1 rounded-md border bg-background px-1.5 shadow-xs", active ? "border-input" : "border-input text-muted-foreground")}>
+      <span className="px-0.5 text-xs">{active ? "range" : label}</span>
+      <input
+        type="date"
+        aria-label={`${label} from`}
+        value={from}
+        onChange={(e) => onChange(e.target.value, to)}
+        className="w-28 bg-transparent font-mono text-xs text-foreground outline-none"
+      />
+      <span className="text-xs text-muted-foreground">–</span>
+      <input
+        type="date"
+        aria-label={`${label} to`}
+        value={to}
+        min={from || undefined}
+        onChange={(e) => onChange(from, e.target.value)}
+        className="w-28 bg-transparent font-mono text-xs text-foreground outline-none"
+      />
+      {active && (
+        <button
+          type="button"
+          aria-label="clear date range"
+          onClick={() => onChange("", "")}
+          className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+    </label>
   );
 }
 
