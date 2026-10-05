@@ -1,7 +1,7 @@
 import { KeyValBadge } from "./ui/key-val-badge";
 import { outcomeBadge } from "../lib/badges";
 import { usd } from "../lib/utils";
-import { localTime } from "../lib/time";
+import { localStamp } from "../lib/time";
 import type { Turn } from "../api";
 import { Bubble, Markdown } from "../lib/chatui";
 
@@ -16,7 +16,7 @@ export function SessionContent({ turns }: { turns: Turn[] }): React.ReactElement
       {turns.map((t) => (
         <div key={t.id} className="rounded-lg border p-3">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[10px] text-muted-foreground">{localTime(t.createdAt)}</span>
+            <span className="font-mono text-[10px] text-muted-foreground">{localStamp(t.createdAt)}</span>
             <KeyValBadge label="status" value={t.outcome} variant={outcomeBadge(t.outcome)} />
             {t.intent && <KeyValBadge label="intent" value={t.intent} variant="success" />}
             <KeyValBadge label="backend" value={t.backendId} variant="outline" />

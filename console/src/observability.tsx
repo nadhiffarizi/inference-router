@@ -9,7 +9,7 @@ import {
 } from "./components/ui/table";
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
-import { localTime } from "./lib/time";
+import { localStamp } from "./lib/time";
 import { Stat } from "./usage";
 import { type TracePayload } from "./components/trace-dialog";
 import { TraceDialog } from "./components/trace-dialog";
@@ -238,7 +238,7 @@ function ObservabilityHome(): React.ReactElement {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>time (local)</TableHead>
+                  <TableHead>date · time (local)</TableHead>
                   <TableHead>tenant</TableHead>
                   <TableHead>capability</TableHead>
                   <TableHead>key</TableHead>
@@ -256,7 +256,7 @@ function ObservabilityHome(): React.ReactElement {
                     className="cursor-pointer"
                     onClick={() => setOpenTrace(r)}
                   >
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(r.createdAt)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localStamp(r.createdAt)}</TableCell>
                     <TableCell>{r.tenant}</TableCell>
                     <TableCell>
                       <Badge variant={r.capability === "support-assistant" ? "info" : "secondary"}>
@@ -280,7 +280,7 @@ function ObservabilityHome(): React.ReactElement {
             {data.activity.map((r) => (
               <button key={r.id} onClick={() => setOpenTrace(r)} className="rounded-xl border p-4 text-left">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs text-muted-foreground">{localTime(r.createdAt)}</span>
+                  <span className="font-mono text-xs text-muted-foreground">{localStamp(r.createdAt)}</span>
                   <Badge variant={outcomeBadge(r.outcome)}>{r.outcome}</Badge>
                 </div>
                 <p className="mt-1 truncate text-sm">{r.question ?? "(no trace)"}</p>
@@ -317,7 +317,7 @@ function ObservabilityHome(): React.ReactElement {
                     <TableCell className="font-mono text-xs text-muted-foreground">{sess.externalId.slice(0, 18)}</TableCell>
                     <TableCell className="text-right tabular-nums">{sess.turns}</TableCell>
                     <TableCell className="text-right tabular-nums">{usd(sess.spendUsd)}</TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(sess.updatedAt)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localStamp(sess.updatedAt)}</TableCell>
                     <TableCell>{sess.deletedAt ? <Badge variant="secondary">deleted (soft)</Badge> : <Badge variant="success">active</Badge>}</TableCell>
                   </TableRow>
                 ))}

@@ -14,7 +14,7 @@ import { LatencyChart } from "./components/latency-chart";
 import { RouteChain } from "./components/route-chain";
 import { outcomeBadge } from "./lib/badges";
 import { usd } from "./lib/utils";
-import { localTime } from "./lib/time";
+import { localStamp } from "./lib/time";
 
 /**
  * The "see all" pages behind /observability's top-K tables: same rows, minus
@@ -128,7 +128,7 @@ export function ActivityLogPage(): React.ReactElement {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>time (local)</TableHead>
+                  <TableHead>date · time (local)</TableHead>
                   <TableHead>tenant</TableHead>
                   <TableHead>capability</TableHead>
                   <TableHead>key</TableHead>
@@ -143,7 +143,7 @@ export function ActivityLogPage(): React.ReactElement {
               <TableBody>
                 {(data?.rows ?? []).map((r) => (
                   <TableRow key={r.id} className="cursor-pointer" onClick={() => setOpenTrace(r)}>
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(r.createdAt)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localStamp(r.createdAt)}</TableCell>
                     <TableCell>{r.tenant}</TableCell>
                     <TableCell>
                       <Badge variant={r.capability === "support-assistant" ? "info" : "secondary"}>
@@ -168,7 +168,7 @@ export function ActivityLogPage(): React.ReactElement {
             {(data?.rows ?? []).map((r) => (
               <button key={r.id} onClick={() => setOpenTrace(r)} className="rounded-xl border p-4 text-left">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs text-muted-foreground">{localTime(r.createdAt)}</span>
+                  <span className="font-mono text-xs text-muted-foreground">{localStamp(r.createdAt)}</span>
                   <Badge variant={outcomeBadge(r.outcome)}>{r.outcome}</Badge>
                 </div>
                 <p className="mt-1 truncate text-sm">{r.question ?? "(no trace)"}</p>
@@ -247,7 +247,7 @@ export function SessionsLogPage(): React.ReactElement {
                     <TableCell className="font-mono text-xs text-muted-foreground">{sess.externalId.slice(0, 18)}</TableCell>
                     <TableCell className="text-right tabular-nums">{sess.turns}</TableCell>
                     <TableCell className="text-right tabular-nums">{usd(sess.spendUsd)}</TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(sess.updatedAt)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localStamp(sess.updatedAt)}</TableCell>
                     <TableCell>{sess.deletedAt ? <Badge variant="secondary">deleted (soft)</Badge> : <Badge variant="success">active</Badge>}</TableCell>
                   </TableRow>
                 ))}
@@ -325,7 +325,7 @@ export function DecisionsLogPage(): React.ReactElement {
               <TableHeader>
                 <TableRow>
                   <TableHead>request</TableHead>
-                  <TableHead>time (local)</TableHead>
+                  <TableHead>date · time (local)</TableHead>
                   <TableHead>tenant</TableHead>
                   <TableHead>capability</TableHead>
                   <TableHead>served by</TableHead>
@@ -337,7 +337,7 @@ export function DecisionsLogPage(): React.ReactElement {
                 {(data?.rows ?? []).map((d) => (
                   <TableRow key={d.requestId}>
                     <TableCell className="font-mono text-xs">{d.requestId.slice(0, 8)}</TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{localTime(d.createdAt)}</TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{localStamp(d.createdAt)}</TableCell>
                     <TableCell>{d.tenant}</TableCell>
                     <TableCell>
                       <Badge variant={d.capability === "support-assistant" ? "info" : "secondary"}>{d.capability}</Badge>

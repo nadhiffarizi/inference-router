@@ -24,7 +24,9 @@ export function browserZone(): string {
   }
 }
 
-/** HH:MM:SS in the viewer's timezone — the per-row "time" column. */
+/** HH:MM:SS in the viewer's timezone — the time half of localStamp; not used
+    standalone for rows, which carry the date too (every trace/listing shows
+    the full date+time, never a bare clock). */
 export function localTime(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : TIME_FMT.format(d);
@@ -65,7 +67,7 @@ export function bucketAxisLabel(bucket: string, kind: "time" | "category"): stri
   return bucket.length === 13 ? CLOCK_FMT.format(d) : DAY_FMT.format(d);
 }
 
-/** Tooltip: the bucket's full start instant, named zone included. */
+/** Tooltip: the bucket's start instant, full date + time (the chart subtitle names the zone). */
 export function bucketTooltipLabel(bucket: string, kind: "time" | "category"): string {
   if (kind === "category") return bucket;
   const d = bucketInstant(bucket);
